@@ -25,6 +25,15 @@ return function(mod, compatibility)
   local DARK = 85 / 255
   local BLACK = 0
 
+  -- Crystal stores its three Move Tutor compatibility bits immediately after
+  -- the 50 TMs and seven HMs. They live in the same species field, but there
+  -- is deliberately no numbered machine item for any of them.
+  local CRYSTAL_TUTOR_MOVES = {
+    FLAMETHROWER = true,
+    THUNDERBOLT = true,
+    ICE_BEAM = true,
+  }
+
   -- Shared with Modern Party UI so a species has the same colour everywhere.
   local TYPE_BASE = {
     NORMAL = { 144, 152, 162 }, FIGHTING = { 206, 63, 107 },
@@ -830,11 +839,160 @@ return function(mod, compatibility)
 
   local function counts(screen)
     local seen, owned = 0, 0
-    for _, row in ipairs(screen.modernDexEntries or {}) do
+    local rows = screen.modernDexAllEntries or screen.modernDexEntries or {}
+    for _, row in ipairs(rows) do
       if row.seen then seen = seen + 1 end
       if row.owned then owned = owned + 1 end
     end
-    return seen, owned, #(screen.modernDexEntries or {})
+    return seen, owned, #rows
+  end
+
+  local function startingGlyph(name)
+    local text = tostring(name or ""):match("^%s*(.-)%s*$") or ""
+    local spans = Font.split(text)
+    local first = spans[1]
+    return first and text:sub(first.from, first.to):upper() or nil
+  end
+
+  local function searchOptions(screen)
+    local letters, types = {}, {}
+    for _, row in ipairs(screen.modernDexAllEntries or {}) do
+      -- Search must not reveal an undiscovered species' name or typing.
+      if row.seen and row.def then
+        local letter = startingGlyph(row.def.name)
+        if letter then letters[letter] = true end
+        for _, typeId in ipairs(row.def.types or {}) do
+          if typeId then types[tostring(typeId)] = true end
+        end
+      end
+    end
+    local letterList, typeList = { false }, { false }
+    for letter in pairs(letters) do letterList[#letterList + 1] = letter end
+    for typeId in pairs(types) do typeList[#typeList + 1] = typeId end
+    local function optionLess(a, b)
+      if a == b then return false end
+      if a == false then return true end
+      if b == false then return false end
+      return tostring(a) < tostring(b)
+    end
+    table.sort(letterList, optionLess)
+    table.sort(typeList, function(a, b)
+      if a == b then return false end
+      if a == false then return true end
+      if b == false then return false end
+      return translatedTypeName(a) < translatedTypeName(b)
+    end)
+    return letterList, typeList
+  end
+
+  local function optionIndex(options, value)
+    for index, option in ipairs(options or {}) do
+      if option == (value or false) then return index end
+    end
+    return 1
+  end
+
+  local function applyDexFilter(screen, letter, typeId)
+    letter = letter or false
+    typeId = typeId or false
+    local current = screen.modernDexEntries
+      and screen.modernDexEntries[screen.index]
+    local currentId = current and current.def and current.def.id
+    local filtered, items = {}, {}
+    local active = letter ~= false or typeId ~= false
+    for _, row in ipairs(screen.modernDexAllEntries or {}) do
+      local matches = not active or row.seen
+      if matches and letter ~= false then
+        local initial = startingGlyph(row.def.name)
+        matches = initial == letter
+      end
+      if matches and typeId ~= false then
+        matches = false
+        for _, candidate in ipairs(row.def.types or {}) do
+          if tostring(candidate) == typeId then matches = true break end
+        end
+      end
+      if matches then
+        filtered[#filtered + 1] = row
+        items[#items + 1] = row.item
+      end
+    end
+    screen.modernDexLetter = letter
+    screen.modernDexType = typeId
+    screen.modernDexEntries = filtered
+    screen.items = items
+    screen.index, screen.scroll = 1, 0
+    if currentId then
+      for index, row in ipairs(filtered) do
+        if row.def and row.def.id == currentId then
+          screen.index = index
+          break
+        end
+      end
+    end
+  end
+
+  local function openDexSearch(screen)
+    local letters, types = searchOptions(screen)
+    screen.modernDexSearchLetters = letters
+    screen.modernDexSearchTypes = types
+    screen.modernDexSearchLetterIndex = optionIndex(
+      letters, screen.modernDexLetter)
+    screen.modernDexSearchTypeIndex = optionIndex(
+      types, screen.modernDexType)
+    screen.modernDexSearchCursor = 1
+    screen.modernDexSearchOpen = true
+  end
+
+  local function searchGeometry(layout)
+    local width = math.min(152, layout.width - 16)
+    return { x = math.floor((layout.width - width) / 2),
+      y = 40, w = width, h = 58 }
+  end
+
+  local function searchValue(screen, field)
+    if field == 1 then
+      return screen.modernDexSearchLetters
+        [screen.modernDexSearchLetterIndex or 1] or "ALL"
+    end
+    local value = screen.modernDexSearchTypes
+      [screen.modernDexSearchTypeIndex or 1]
+    return value and translatedTypeName(value) or "ALL"
+  end
+
+  local function drawDexSearch(screen, layout)
+    local rect = searchGeometry(layout)
+    gray(BLACK)
+    chamfer("fill", rect.x + 2, rect.y + 2, rect.w, rect.h, 4)
+    gray(WHITE)
+    chamfer("fill", rect.x, rect.y, rect.w, rect.h, 4)
+    drawCentered("SEARCH", rect.x + 5, rect.y + 5, rect.w - 10, DARK)
+    for field, label in ipairs({ "LETTER", "TYPE" }) do
+      local y = rect.y + 18 + (field - 1) * 15
+      local selected = field == screen.modernDexSearchCursor
+      if selected then
+        gray(DARK)
+        chamfer("fill", rect.x + 5, y - 2, rect.w - 10, 13, 2)
+      end
+      drawText(label, rect.x + 10, y, 48, selected and WHITE or BLACK)
+      drawRight(searchValue(screen, field), rect.x + rect.w - 10, y,
+        math.max(24, rect.w - 70), selected and WHITE or DARK)
+    end
+    drawCentered("A APPLY", rect.x + 5, rect.y + rect.h - 12,
+      rect.w - 10, DARK)
+
+    gray(DARK)
+    love.graphics.rectangle("fill", 0, layout.footerY,
+      layout.width, SCREEN_H - layout.footerY)
+    if layout.wide then
+      drawText("UP/DOWN FIELD", 5, layout.footerY + 2, 104, WHITE)
+      drawRight("L/R CHANGE B BACK", layout.width - 5,
+        layout.footerY + 2, 136, LIGHT)
+    else
+      drawText("U/D", 5, layout.footerY + 2, 24, WHITE)
+      drawRight("L/R PICK B", layout.width - 5,
+        layout.footerY + 2, 80, LIGHT)
+    end
   end
 
   local function drawHeader(screen, layout)
@@ -859,6 +1017,12 @@ return function(mod, compatibility)
   end
 
   local function drawList(screen, layout, regions)
+    if #(screen.modernDexEntries or {}) == 0 then
+      drawCentered("NO MATCHES", layout.list.x + 4,
+        layout.list.y + math.floor((layout.list.h - 8) / 2),
+        layout.list.w - 8, DARK)
+      return
+    end
     for visible = 1, layout.rows do
       local index = screen.scroll + visible
       local row = screen.modernDexEntries[index]
@@ -945,14 +1109,21 @@ return function(mod, compatibility)
     local seen, owned, total = counts(screen)
     if layout.wide then
       drawText("A ACTIONS", 5, layout.footerY + 2, 72, WHITE)
-      drawCentered("UP/DOWN BROWSE  LEFT/RIGHT PAGE", 84,
+      local filtered = screen.modernDexLetter or screen.modernDexType
+      local center = filtered
+        and ("FOUND %03d"):format(#(screen.modernDexEntries or {}))
+        or "SEL FIND"
+      drawCentered(center, 84,
         layout.footerY + 2, layout.width - 168, LIGHT)
       drawRight("B BACK", layout.width - 5, layout.footerY + 2, 56, WHITE)
     else
-      local seenLabel = ("SEEN %03d"):format(seen)
+      local filtered = screen.modernDexLetter or screen.modernDexType
+      local seenLabel = filtered
+        and ("FOUND %03d"):format(#(screen.modernDexEntries or {}))
+        or ("SEEN %03d"):format(seen)
       local seenWidth = drawText(seenLabel,
         5, layout.footerY + 2, Font.width(seenLabel), WHITE)
-      local action = layout.width >= 178 and "A OPEN B BACK" or "A OPEN B"
+      local action = "SEL SEARCH"
       drawRight(action, layout.width - 5, layout.footerY + 2,
         math.max(0, layout.width - 16 - seenWidth), WHITE)
     end
@@ -1015,6 +1186,11 @@ return function(mod, compatibility)
         x = layout.preview.x, y = layout.preview.y,
         w = layout.preview.w, h = layout.preview.h }
     end
+    if screen.modernDexSearchOpen then
+      local rect = searchGeometry(layout)
+      zones[#zones + 1] = { colors = PaletteFX.GRAYS,
+        x = rect.x, y = rect.y, w = rect.w + 2, h = rect.h + 2 }
+    end
     zones[#zones + 1] = { colors = PaletteFX.pal(game.data, "CYANMON") or base,
       x = 0, y = layout.footerY, w = layout.width, h = FOOTER_H }
     return zones
@@ -1069,7 +1245,11 @@ return function(mod, compatibility)
     local screen = BuiltinPokedex.new(game, opts)
     local nativeUpdate = screen.update
     screen.modernPokedexUI = true
-    screen.modernDexEntries = dexRows(game)
+    screen.modernDexAllEntries = dexRows(game)
+    for index, row in ipairs(screen.modernDexAllEntries) do
+      row.item = screen.items[index]
+    end
+    screen.modernDexEntries = screen.modernDexAllEntries
     screen.modernDexClock = 0
     screen.uiSize = uiSize
     screen.isWideBattleLayout = function()
@@ -1079,6 +1259,38 @@ return function(mod, compatibility)
       local layout = activeLayout(self)
       self.rows = layout.rows
       self.modernDexClock = (self.modernDexClock + 1) % 32000
+      local input = self.game.input
+      if self.modernDexSearchOpen then
+        if input:wasPressed("b") then
+          self.modernDexSearchOpen = false
+        elseif input:wasPressed("up") or input:wasPressed("down") then
+          self.modernDexSearchCursor = 3 - (self.modernDexSearchCursor or 1)
+        elseif input:wasPressed("left") or input:wasPressed("right") then
+          local delta = input:wasPressed("left") and -1 or 1
+          local field = self.modernDexSearchCursor or 1
+          local options = field == 1 and self.modernDexSearchLetters
+            or self.modernDexSearchTypes
+          local key = field == 1 and "modernDexSearchLetterIndex"
+            or "modernDexSearchTypeIndex"
+          self[key] = ((self[key] or 1) - 1 + delta) % #options + 1
+        elseif input:wasPressed("a") or input:wasPressed("select") then
+          local letter = self.modernDexSearchLetters
+            [self.modernDexSearchLetterIndex or 1] or false
+          local typeId = self.modernDexSearchTypes
+            [self.modernDexSearchTypeIndex or 1] or false
+          applyDexFilter(self, letter, typeId)
+          self.modernDexSearchOpen = false
+        end
+        return
+      elseif input:wasPressed("select") then
+        openDexSearch(self)
+        require("src.core.Sound").play(self.game.data, "Press_AB")
+        return
+      elseif #self.items == 0 and input:wasPressed("a") then
+        openDexSearch(self)
+        require("src.core.Sound").play(self.game.data, "Press_AB")
+        return
+      end
       nativeUpdate(self, dt)
       -- B/QUIT may pop this list and synchronously reopen the Start menu.
       -- Do not mistake that newly pushed menu for our DATA/CRY side menu or
@@ -1101,9 +1313,12 @@ return function(mod, compatibility)
       drawFooter(self, layout)
       local top = self.game.stack and self.game.stack:top()
       local cutout
-      if top and top.modernDexOwner == self then
+      if self.modernDexSearchOpen then
+        cutout = searchGeometry(layout)
+      elseif top and top.modernDexOwner == self then
         cutout = actionGeometry(top, self, layout)
       end
+      if self.modernDexSearchOpen then drawDexSearch(self, layout) end
       for _, rect in ipairs(regions) do markOutside(rect, cutout) end
       gray(WHITE)
     end
@@ -1683,47 +1898,54 @@ return function(mod, compatibility)
       layout.content.w - 12, DARK)
   end
 
-  local function moveRows(state, requestedMode)
-    local rows = {}
-    local mode = requestedMode or state.modernMoveMode
-    if mode == "machine" then
-      for _, id in ipairs(state.def.tmhm or {}) do
-        rows[#rows + 1] = { source = "TM", id = id,
-          move = state.game.data.moves and state.game.data.moves[id] }
+  local function machineSource(game, moveId)
+    for _, item in pairs(game.data.items or {}) do
+      local machine = item.machine
+      if machine and machine.move == moveId then
+        local kind = tostring(machine.kind or "TM"):upper()
+        return kind, Strings("%s%02d", kind, machine.number or 0), "machine"
       end
-    else
-      local added = {}
-      for _, id in ipairs(state.def.level1Moves or {}) do
-        if not added["1:" .. id] then
-          rows[#rows + 1] = { source = "1", level = 1, id = id,
-            move = state.game.data.moves and state.game.data.moves[id] }
-          added["1:" .. id] = true
-        end
-      end
-      for _, learned in ipairs(state.def.learnset or {}) do
-        local key = tostring(learned.level or 1) .. ":" .. tostring(learned.move)
-        if not added[key] then
-          rows[#rows + 1] = { source = learned.level
-              and tostring(learned.level) or "",
-            level = learned.level, id = learned.move,
-            move = state.game.data.moves and state.game.data.moves[learned.move] }
-          added[key] = true
-        end
-      end
-      table.sort(rows, function(a, b)
-        return (a.level or 0) < (b.level or 0)
-      end)
     end
-    return rows
+    if compatibility.crystal251 and CRYSTAL_TUTOR_MOVES[moveId] then
+      return "TUTOR", "TUTOR", "tutor"
+    end
+    return "TM/HM", "TM/HM", "compatibility"
   end
 
-  local function availableMoveModes(state)
-    local modes = {}
-    if #moveRows(state, "level") > 0 then modes[#modes + 1] = "level" end
-    if #moveRows(state, "machine") > 0 then
-      modes[#modes + 1] = "machine"
+  local function moveRows(state)
+    local levelRows, machineRows = {}, {}
+    local added = {}
+    for _, id in ipairs(state.def.level1Moves or {}) do
+      if not added["1:" .. id] then
+        levelRows[#levelRows + 1] = { source = "1", level = 1, id = id,
+          kind = "level",
+          move = state.game.data.moves and state.game.data.moves[id] }
+        added["1:" .. id] = true
+      end
     end
-    return modes
+    for _, learned in ipairs(state.def.learnset or {}) do
+      local key = tostring(learned.level or 1) .. ":" .. tostring(learned.move)
+      if not added[key] then
+        levelRows[#levelRows + 1] = { source = learned.level
+            and tostring(learned.level) or "",
+          level = learned.level, id = learned.move, kind = "level",
+          move = state.game.data.moves and state.game.data.moves[learned.move] }
+        added[key] = true
+      end
+    end
+    table.sort(levelRows, function(a, b)
+      return (a.level or 0) < (b.level or 0)
+    end)
+    for _, id in ipairs(state.def.tmhm or {}) do
+      local short, full, kind = machineSource(state.game, id)
+      machineRows[#machineRows + 1] = {
+        source = short, sourceDetail = full, id = id, kind = kind,
+        move = state.game.data.moves and state.game.data.moves[id],
+      }
+    end
+    for _, row in ipairs(machineRows) do levelRows[#levelRows + 1] = row end
+    state.modernMoveMachineStart = #levelRows - #machineRows + 1
+    return levelRows
   end
 
   local function moveListState(state, layout)
@@ -1988,9 +2210,17 @@ return function(mod, compatibility)
   local function drawMovesPage(state, layout)
     panel(layout.content.x, layout.content.y,
       layout.content.w, layout.content.h, false)
-    local mode = state.modernMoveMode == "machine" and "TM/HM" or "LEVEL UP"
-    drawText(mode, layout.content.x + 6, layout.content.y + 5, 88, DARK)
     local rows, maxVisible = moveListState(state, layout)
+    local hasTutor = false
+    for _, row in ipairs(rows) do
+      if row.kind == "tutor" then hasTutor = true break end
+    end
+    local heading = hasTutor
+      and (layout.wide and "LEVEL/TM-HM/TUTOR" or "LV/TM/HM/TUT")
+      or (layout.wide and "LEVEL UP/TM-HM" or "LV/TM-HM")
+    drawText(heading,
+      layout.content.x + 6, layout.content.y + 5,
+      layout.content.w - 42, DARK)
     drawRight("PP",
       layout.content.x + layout.content.w - 6, layout.content.y + 5,
       24, DARK)
@@ -2008,10 +2238,15 @@ return function(mod, compatibility)
         gray(WHITE)
         love.graphics.rectangle("fill", layout.content.x + 7, y + 4, 3, 3)
       end
-      drawText(row.source, layout.content.x + 12, y + 2, 17,
+      local source = row.kind == "level"
+        and row.source or (row.sourceDetail or row.source)
+      local sourceWidth = row.kind == "level" and 17
+        or math.min(42, Font.width(Strings(tostring(source or ""))) + 2)
+      drawText(source, layout.content.x + 12, y + 2, sourceWidth,
         selected and WHITE or DARK)
-      drawText(move.name or row.id, layout.content.x + 31, y + 2,
-        layout.content.w - 62,
+      drawText(move.name or row.id,
+        layout.content.x + 14 + sourceWidth, y + 2,
+        layout.content.w - sourceWidth - 45,
         selected and WHITE or BLACK)
       if move.pp ~= nil then
         drawRight(tostring(move.pp),
@@ -2034,9 +2269,9 @@ return function(mod, compatibility)
     chamfer("fill", x, y, w, 28, 3)
     drawText(move.name or row.id, x + 6, y + 4,
       w - (layout.wide and 86 or 54), BLACK)
-    local source = state.modernMoveMode == "machine"
-      and tostring(row.source or "TM/HM")
-      or Strings("LEVEL %s", tostring(row.source or "?"))
+    local source = row.kind == "level"
+      and Strings("LEVEL %s", tostring(row.source or "?"))
+      or tostring(row.sourceDetail or row.source or "COMPATIBLE")
     drawText(source, x + 6, y + 15, w - 70, DARK)
     if move.type then
       drawTypeChip(translatedTypeName(move.type),
@@ -2154,8 +2389,7 @@ return function(mod, compatibility)
   local function buildEntryPages(state)
     local family = state.modernDexFamily or familyFor(state.game, state.def)
     state.modernDexFamily = family
-    local moveModes = availableMoveModes(state)
-    state.modernMoveModes = moveModes
+    local moves = moveRows(state)
     local pages = { { id = "info", label = "INFO", shortLabel = "INFO" } }
     if hasStatsData(state.def) then
       pages[#pages + 1] = {
@@ -2167,7 +2401,7 @@ return function(mod, compatibility)
         id = "family", label = "FAMILY", shortLabel = "EVO",
       }
     end
-    if #moveModes > 0 then
+    if #moves > 0 then
       pages[#pages + 1] = {
         id = "moves", label = "MOVES", shortLabel = "MOVE",
       }
@@ -2278,8 +2512,6 @@ return function(mod, compatibility)
         right = "B LIST"
       elseif page.id == "family" then
         right = layout.wide and "A VIEW B BACK" or "A VIEW B"
-      elseif page.id == "moves" and #(state.modernMoveModes or {}) > 1 then
-        right = layout.wide and "A VIEW SEL MODE" or "A VIEW SEL"
       elseif page.id == "moves" then
         right = layout.wide and "A VIEW B BACK" or "A VIEW B"
       elseif page.footer then
@@ -2490,35 +2722,30 @@ return function(mod, compatibility)
       math.min(maxScroll, (state.modernInfoScroll or 0) + delta))
   end
 
-  local function cycleMoveMode(state)
-    local modes = state.modernMoveModes or {}
-    if #modes < 2 then return false end
-    local nextMode = 1
-    for index, mode in ipairs(modes) do
-      if mode == state.modernMoveMode then
-        nextMode = index % #modes + 1
-        break
-      end
-    end
-    state.modernMoveMode = modes[nextMode]
-    resetMoveSelection(state)
-    return true
-  end
-
   local function syncDexListSelection(state, species)
     local list = state.modernDexSource
     if not (list and type(list.modernDexEntries) == "table") then return end
-    for index, row in ipairs(list.modernDexEntries) do
-      if row.def and row.def.id == species then
-        list.index = index
-        local rows = math.max(1, list.rows or activeLayout(list).rows)
-        if index <= list.scroll then
-          list.scroll = index - 1
-        elseif index > list.scroll + rows then
-          list.scroll = index - rows
+    local function selectSpecies()
+      for index, row in ipairs(list.modernDexEntries) do
+        if row.def and row.def.id == species then
+          list.index = index
+          local rows = math.max(1, list.rows or activeLayout(list).rows)
+          if index <= list.scroll then
+            list.scroll = index - 1
+          elseif index > list.scroll + rows then
+            list.scroll = index - rows
+          end
+          return true
         end
-        return
       end
+      return false
+    end
+    if selectSpecies() then return end
+    -- A viewed evolution can sit outside the active letter/type filter. Clear
+    -- it so returning to the index can still focus the species just opened.
+    if list.modernDexLetter or list.modernDexType then
+      applyDexFilter(list, false, false)
+      selectSpecies()
     end
   end
 
@@ -2529,11 +2756,9 @@ return function(mod, compatibility)
     state.forceOwned = false
     state.modernDexFamily = nil
     state.modernFamilyCursor = nil
-    state.modernMoveMode = "level"
     resetMoveSelection(state)
     state.modernInfoScroll = 0
     state.modernDexPages = buildEntryPages(state)
-    state.modernMoveMode = state.modernMoveModes[1] or "level"
     state.modernDexPage = 1
     syncDexListSelection(state, state.def.id)
     require("src.core.Sound").playCry(state.game.data, state.def.id)
@@ -2549,7 +2774,6 @@ return function(mod, compatibility)
     state.modernDexSource = state.modernDexTabbed and source or nil
     state.modernDexPage = 1
     state.modernFamilyCursor = nil
-    state.modernMoveMode = "level"
     state.modernMoveCursor = 1
     state.modernMoveScroll = 0
     state.modernMoveDetail = false
@@ -2560,7 +2784,6 @@ return function(mod, compatibility)
       return setting("responsive", true)
     end
     state.modernDexPages = buildEntryPages(state)
-    state.modernMoveMode = state.modernMoveModes[1] or "level"
     state.update = function(self, dt)
       self.modernDexClock = (self.modernDexClock + 1) % 32000
       if not self.modernDexTabbed then
@@ -2598,9 +2821,6 @@ return function(mod, compatibility)
         self.modernDexPage = self.modernDexPage % count + 1
         resetMoveSelection(self)
         self.modernInfoScroll = 0
-      elseif entryPage(self).id == "moves"
-          and input:wasPressed("select") and cycleMoveMode(self) then
-        require("src.core.Sound").play(self.game.data, "Press_AB")
       elseif input:wasPressed("a") then
         local page = entryPage(self)
         if page.id == "family" then

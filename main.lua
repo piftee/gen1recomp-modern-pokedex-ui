@@ -15,6 +15,7 @@ return function(mod)
   local wildsOfKanto = mod.find("overworld_wild_spawns")
   local compatibility = {
     gen1ModernUi = mod.find("gen1_modern_ui") ~= nil,
+    crystal251 = crystal251 ~= nil,
     hgssSprites = mod.find("HGSS_SPRITES") ~= nil,
     uniqueMenuIcons = mod.find("unique_menu_icons") ~= nil,
     wildsOfKanto = wildsOfKanto ~= nil,

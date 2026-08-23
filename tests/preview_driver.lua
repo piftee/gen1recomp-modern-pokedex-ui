@@ -34,6 +34,11 @@ return function(game)
   U.log(dex.modernPokedexUI and "PASS modern Pokedex is active"
     or "FAIL modern Pokedex was not registered")
   U.shot(game, DIR .. "/modern_pokedex_list.png")
+  U.tap(game, "select")
+  U.wait(5)
+  U.shot(game, DIR .. "/modern_pokedex_search.png")
+  U.tap(game, "b")
+  U.wait(3)
 
   dex.onChoose(dex.items[dex.index], dex)
   dex:update(0)
@@ -59,6 +64,11 @@ return function(game)
         U.wait(8)
         U.shot(game, DIR .. "/modern_pokedex_" .. wanted .. ".png")
         if wanted == "moves" then
+          local rows = entry.modernMoveRows or {}
+          entry.modernMoveCursor = math.max(1, #rows)
+          entry.modernMoveScroll = math.max(0, #rows - 7)
+          U.wait(5)
+          U.shot(game, DIR .. "/modern_pokedex_moves_tmhm.png")
           entry.modernMoveDetail = true
           U.wait(8)
           U.shot(game, DIR .. "/modern_pokedex_move_detail.png")
@@ -120,4 +130,37 @@ return function(game)
   })
   U.wait(5)
   U.shot(game, DIR .. "/modern_pokedex_compact_list.png")
+  U.tap(game, "select")
+  U.wait(5)
+  U.shot(game, DIR .. "/modern_pokedex_compact_search.png")
+  U.tap(game, "b")
+
+  -- Crystal 251 stores its three Move Tutors after the machine bits. Capture
+  -- one of those rows when available so it cannot regress into an unknown TM.
+  local tutorSpecies
+  for id, def in pairs(game.data.pokemon or {}) do
+    for _, move in ipairs(def.tmhm or {}) do
+      if move == "FLAMETHROWER" then tutorSpecies = id break end
+    end
+    if tutorSpecies then break end
+  end
+  if tutorSpecies then
+    love.window.setMode(1280, 720, {
+      resizable = true, minwidth = 640, minheight = 576,
+    })
+    local tutorEntry = Screens.push(game, "DexEntryMenu", tutorSpecies)
+    for index, page in ipairs(tutorEntry.modernDexPages or {}) do
+      if page.id == "moves" then tutorEntry.modernDexPage = index break end
+    end
+    U.wait(6)
+    for index, row in ipairs(tutorEntry.modernMoveRows or {}) do
+      if row.kind == "tutor" then
+        tutorEntry.modernMoveCursor = index
+        tutorEntry.modernMoveScroll = math.max(0, index - 7)
+        break
+      end
+    end
+    U.wait(5)
+    U.shot(game, DIR .. "/modern_pokedex_moves_tutor.png")
+  end
 end

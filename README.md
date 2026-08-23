@@ -12,7 +12,9 @@ four-shade palette ramps, hard outlines, and chamfered cards.
 ## What changes
 
 - a responsive Pokédex index with icon cards, caught/seen progress, typing,
-  scrolling, and a live battle-art preview on wide displays
+  scrolling, starting-letter and type filters, and a live battle-art preview
+  on wide displays; search values are limited to discovered species so the
+  feature never leaks an unseen Pokémon's name or typing
 - a compact 160×144 layout that preserves the same browsing flow
 - an INFO page with dex number, caught state, available category, type,
   measurements, and field notes; long notes scroll instead of being discarded
@@ -23,12 +25,17 @@ four-shade palette ramps, hard outlines, and chamfered cards.
   unknown members, selectable relatives, and the selected member's evolution
   method
 - a MOVES page when level-up or TM/HM compatibility data exists, with a
-  selectable, fully type-coloured list limited to level/source, name, and PP;
-  its details view shows type, power, accuracy, category, priority, and effect
-  only when those fields are supplied and an effect has meaningful display
-  text (internal compatibility identifiers are never shown as descriptions).
-  Crystal 251 effect families and Useful Move Info's curated vanilla copy are
-  consumed when those mods are present
+  selectable, fully type-coloured continuous list limited to level/source,
+  name, and PP. Level-up moves appear first and every compatible TM/HM is
+  appended beneath them, with its full `TMxx` or `HMxx` number immediately
+  before the move name. Its details view repeats the machine number and shows
+  type, power, accuracy, category, priority, and effect only when those fields
+  are supplied and an effect has meaningful display text (internal
+  compatibility identifiers are never shown as descriptions). Crystal 251
+  effect families and Useful Move Info's curated vanilla copy are consumed
+  when those mods are present. Crystal 251's Flamethrower, Thunderbolt, and Ice
+  Beam Move Tutors are correctly labelled `TUTOR` rather than being given a
+  false TM number
 - the native DATA, CRY, AREA, QUIT, and Pokémon Yellow PRNT actions remain
   authoritative
 
@@ -78,7 +85,12 @@ abbreviations such as `PSN` or `FLY`.
 | Browse | Up/Down |
 | Jump a page | Left/Right |
 | Open actions | A |
+| Open search | Select |
 | Return | B |
+
+In SEARCH, Up/Down chooses the letter or type field, Left/Right changes its
+value, A applies both fields, and B cancels. Set both fields to ALL to restore
+the complete index. Letter and type filters may be combined.
 
 ### Species research file
 
@@ -90,7 +102,6 @@ abbreviations such as `PSN` or `FLY`.
 | Scroll field notes | Up/Down on INFO, when notes overflow |
 | Select/scroll moves | Up/Down on MOVES |
 | Open selected move details | A on MOVES |
-| Switch level/TM source | Select, when both sources exist |
 | Return to move list | B from move details |
 | Play cry | A on other built-in pages |
 | Return | B |

@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.0] - 2026-08-23
+
+### Added
+
+- Select opens a modern-retro Pokédex search panel with combinable
+  starting-letter and type fields. Only discovered species contribute options
+  or results, preventing search from revealing unseen identity data.
+- Starting-letter options use the translated name's first rendered glyph, so
+  accented and non-Latin font pages are not forced into English A-Z buckets.
+- Active filters remain synchronized with the native Pokédex action items and
+  can be cleared by returning both fields to ALL.
+
+### Changed
+
+- MOVES is now one continuous list: level-up moves remain first and compatible
+  TMs/HMs are appended at the bottom, with each full TM/HM number shown before
+  its move name and repeated in move details.
+- Crystal 251's three Move Tutor entries are labelled `TUTOR`; they no longer
+  appear as a clipped, unknown TM/HM number.
+- Removed the separate Select-to-switch machine mode; Up/Down and A now browse
+  and inspect the complete learnset without changing sources.
+
 ## [0.1.8] - 2026-08-23
 
 ### Fixed

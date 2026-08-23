@@ -32,6 +32,9 @@ data.palettes = {
   pokemon = {},
 }
 data.pokemon.FIXMON_A.extraAbilities = { "OVERGROW" }
+data.pokemon.FIXMON_A.name = "ALPHAMON"
+data.pokemon.FIXMON_B.name = "BLAZEMON"
+data.pokemon.FIXMON_C.name = "ÉCORAL"
 for index = 1, 8 do
   local id = "FIX_EXTRA_" .. index
   data.moves[id] = {
@@ -91,6 +94,11 @@ local game = {
   } },
   stack = stack, input = input,
 }
+local function press(state, key)
+  input.pressed[key] = true
+  state:update(0)
+  input.pressed[key] = nil
+end
 
 local dex = dexRecord.new(game)
 stack:push(dex)
@@ -182,6 +190,44 @@ T.check(sawCaughtProgress,
   "the wide header presents a single caught-progress fraction")
 T.check(not sawCrowdedHeader,
   "the wide header omits the crowded region and seen labels")
+
+-- SELECT opens a controller-friendly search panel. Letter and type filters
+-- can be combined, but their options and matches only use discovered data.
+press(dex, "select")
+T.check(dex.modernDexSearchOpen and dex.modernDexSearchCursor == 1,
+  "SELECT opens Pokedex search on the starting-letter field")
+local sawLocalizedInitial = false
+for _, letter in ipairs(dex.modernDexSearchLetters or {}) do
+  if letter == "É" then sawLocalizedInitial = true break end
+end
+T.check(sawLocalizedInitial,
+  "starting-letter search retains a translated non-ASCII first glyph")
+press(dex, "right")
+press(dex, "a")
+T.eq(#dex.modernDexEntries, 1,
+  "applying a starting-letter search filters the native and modern lists")
+T.eq(dex.modernDexEntries[1].def.id, "FIXMON_A",
+  "starting-letter search returns the matching discovered species")
+T.eq(#dex.items, #dex.modernDexEntries,
+  "filtered native actions stay aligned with modern Pokedex rows")
+
+press(dex, "select")
+press(dex, "left") -- Letter A -> ALL.
+press(dex, "down")
+press(dex, "right") -- First translated type is FIRE.
+press(dex, "a")
+T.eq(#dex.modernDexEntries, 1,
+  "applying a type search filters to compatible discovered species")
+T.eq(dex.modernDexEntries[1].def.id, "FIXMON_B",
+  "type search uses the species' actual type identifiers")
+
+press(dex, "select")
+press(dex, "down")
+press(dex, "left") -- FIRE -> ALL.
+press(dex, "a")
+T.eq(#dex.modernDexEntries, 3,
+  "returning both search fields to ALL restores the complete Pokedex")
+dex.index, dex.scroll = 1, 0
 
 -- The DATA/CRY/AREA/QUIT overlay is a neutral white card whose geometry
 -- includes both its heading and every row.
@@ -294,11 +340,6 @@ end
 T.check(battleArt,
   "Pokedex profiles resolve through the exact battle-front sprite context")
 
-local function press(state, key)
-  input.pressed[key] = true
-  state:update(0)
-  input.pressed[key] = nil
-end
 press(entry, "right")
 T.eq(entry.modernDexPages[entry.modernDexPage].id, "stats",
   "RIGHT visits the next available page")
@@ -314,7 +355,9 @@ T.eq(entry.modernFamilyCursor, 1,
 press(entry, "right")
 T.eq(entry.modernDexPages[entry.modernDexPage].id, "moves",
   "moves are reachable when level and machine data exist")
-T.eq(entry.modernMoveMode, "level", "moves start on an available source")
+entry:draw()
+T.eq(#entry.modernMoveRows, 11,
+  "the move list combines level-up moves with compatible TM/HM moves")
 for _ = 1, 7 do press(entry, "down") end
 T.eq(entry.modernMoveCursor, 8,
   "DOWN moves a real cursor through the move list")
@@ -398,11 +441,75 @@ end
 T.check(ordinaryDetailText.EFFECT and sawOrdinaryDetail,
   "ordinary moves keep an informative effect panel without Crystal 251")
 press(entry, "b")
-press(entry, "select")
-T.eq(entry.modernMoveMode, "machine",
-  "SELECT switches source only when a second move source exists")
-T.eq(entry.modernMoveCursor, 1,
-  "switching move source resets its selection safely")
+for _ = 1, 10 do press(entry, "down") end
+T.eq(entry.modernMoveCursor, 11,
+  "DOWN reaches the compatible TM/HM rows appended after level-up moves")
+T.eq(entry.modernMoveRows[11].kind, "machine",
+  "the final move row is identified as machine compatibility data")
+local machineListText = {}
+Font.draw = function(value, x, y)
+  machineListText[tostring(value)] = true
+  return realMoveFont(value, x, y)
+end
+entry:draw()
+Font.draw = realMoveFont
+T.check(machineListText.TM01 and machineListText["FIX CUT"],
+  "compatible move rows put the complete TM/HM number before the move name")
+press(entry, "a")
+local machineDetailText = {}
+Font.draw = function(value, x, y)
+  machineDetailText[tostring(value)] = true
+  return realMoveFont(value, x, y)
+end
+entry:draw()
+Font.draw = realMoveFont
+T.check(machineDetailText.TM01 and machineDetailText["FIX CUT"],
+  "a compatible machine row opens details with its TM/HM number")
+press(entry, "b")
+
+-- Crystal's final three compatibility bits are Move Tutors, not numbered
+-- machines. They must not be presented as a clipped or unknown TM number.
+run.data.moves.FLAMETHROWER = {
+  id = "FLAMETHROWER", name = "FLAMETHROWER", type = "FIRE",
+  power = 95, accuracy = 100, pp = 15,
+}
+local tmhm = run.data.pokemon.FIXMON_A.tmhm
+tmhm[#tmhm + 1] = "FLAMETHROWER"
+local tutorEntry = entryRecord.new(game, "FIXMON_A")
+tutorEntry.modernDexTabbed = true
+stack:push(tutorEntry)
+for index, page in ipairs(tutorEntry.modernDexPages) do
+  if page.id == "moves" then tutorEntry.modernDexPage = index break end
+end
+tutorEntry:draw()
+local tutorRow = tutorEntry.modernMoveRows[#tutorEntry.modernMoveRows]
+T.eq(tutorRow.kind, "tutor",
+  "Crystal 251 Move Tutor compatibility is distinguished from machines")
+tutorEntry.modernMoveCursor = #tutorEntry.modernMoveRows
+tutorEntry.modernMoveScroll = math.max(0, #tutorEntry.modernMoveRows - 7)
+local tutorListText = {}
+Font.draw = function(value, x, y)
+  tutorListText[tostring(value)] = true
+  return realMoveFont(value, x, y)
+end
+tutorEntry:draw()
+Font.draw = realMoveFont
+T.check(tutorListText.TUTOR and tutorListText.FLAMETHROWER,
+  "Crystal tutor rows show TUTOR before the move name instead of an unknown TM")
+press(tutorEntry, "a")
+local tutorDetailText = {}
+Font.draw = function(value, x, y)
+  tutorDetailText[tostring(value)] = true
+  return realMoveFont(value, x, y)
+end
+tutorEntry:draw()
+Font.draw = realMoveFont
+T.check(tutorDetailText.TUTOR and tutorDetailText.FLAMETHROWER,
+  "Crystal tutor move details retain the correct source label")
+stack:pop()
+tmhm[#tmhm] = nil
+run.data.moves.FLAMETHROWER = nil
+
 press(entry, "right")
 T.eq(entry.modernDexPages[entry.modernDexPage].id, "abilities",
   "a companion data mod can append its own conditional research page")
@@ -460,6 +567,7 @@ local commonSizes = {
   { 640, 576, 160 }, { 768, 576, 192 }, { 896, 576, 224 },
   { 960, 576, 240 }, { 1280, 720, 256 },
 }
+press(dex, "select")
 for _, size in ipairs(commonSizes) do
   graphics.getPixelDimensions = function() return size[1], size[2] end
   T.eq(select(1, responsiveEntry:uiSize()), size[3],
@@ -488,6 +596,7 @@ for _, size in ipairs(commonSizes) do
       Strings("Pokedex list keeps palette regions inside %dpx", size[3]))
   end
 end
+press(dex, "b")
 
 graphics.getPixelDimensions = function() return 640, 576 end
 local compactListFooter = {}

@@ -21,6 +21,8 @@ later-generation systems that are absent from the active data model.
   power, and PP are each drawn only when their own source value exists.
 - Unknown discovery state may be represented as unknown; absent schema data
   is never represented as a fabricated zero or question mark.
+- Search letters, types, and results are derived only from discovered rows;
+  filtering cannot reveal an unseen species' identity data.
 
 ## Artwork rules
 
@@ -39,7 +41,7 @@ later-generation systems that are absent from the active data model.
 ## Layout checks
 
 - 160×144: purpose-built compact INFO and STATS compositions, browsable move
-  details, and no off-screen controls.
+  details, fitted search controls, and no off-screen controls.
 - 192×144 and 224×144: compact compositions expand without label collisions.
 - 240×144 and 256×144: list plus live preview; research profile rail plus main
   data card, with shortened footer hints where the long forms would overlap.
@@ -51,14 +53,16 @@ later-generation systems that are absent from the active data model.
 ## Behaviour checks
 
 - DATA opens tabbed research only from the modern Pokédex list.
+- Select opens letter/type search; both fields combine, ALL clears them, and
+  the filtered native action items remain aligned with the visible cards.
 - Script-driven and newly-caught entries use A to advance unread notes before
   closing and retain immediate B-close and callback behavior.
 - CRY remains repeatable from the action menu and research pages.
 - FAMILY uses Up/Down for card focus because Left/Right remains reserved for
   tabs; A opens a known member in-place and synchronizes the backing list.
 - INFO uses Up/Down only when wrapped notes exceed its visible lines.
-- MOVES uses Up/Down for selection, A for conditional details, Select for an
-  available source switch, and B to return to the list.
+- MOVES uses one continuous Up/Down list: level-up rows first, compatible
+  TM/HM rows at the bottom, A for conditional details, and B to return.
 - AREA still opens the native encounter map, including alongside Gen1 Modern
   UI where the source-owned Pokédex remains underneath it.
 - Yellow PRNT retains the native printable renderer.

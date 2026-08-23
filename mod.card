@@ -5,13 +5,14 @@ return {
   differences = {
     changed = {
       "The Pokedex list becomes a responsive icon-card research index",
+      "Select opens starting-letter and type search without revealing unseen data",
       "Species DATA becomes a conditional tabbed research file",
       "Large profiles use the same artwork selected for battle",
     },
     added = {
       "Available base stats, total, catch rate, base EXP, and growth rate",
       "Evolution-family overview and current evolution method",
-      "Selectable level-up and TM/HM moves with conditional detail views",
+      "One selectable level-up and compatible TM/HM list with detail views",
       "Conditional page extension hook for data supplied by other mods",
       "Unique Menu Icons and alpha-fitted HGSS icon compatibility",
       "Compact 160x144 and responsive widescreen layouts",
