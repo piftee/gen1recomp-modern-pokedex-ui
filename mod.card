@@ -1,0 +1,31 @@
+return {
+  summary = "A useful modern-retro Pokedex whose pages adapt to the data each species actually has.",
+  author = "ishhodaszi",
+  tags = { "ui", "quality-of-life", "pokedex" },
+  differences = {
+    changed = {
+      "The Pokedex list becomes a responsive icon-card research index",
+      "Species DATA becomes a conditional tabbed research file",
+      "Large profiles use the same artwork selected for battle",
+    },
+    added = {
+      "Available base stats, total, catch rate, base EXP, and growth rate",
+      "Evolution-family overview and current evolution method",
+      "Selectable level-up and TM/HM moves with conditional detail views",
+      "Conditional page extension hook for data supplied by other mods",
+      "Unique Menu Icons and alpha-fitted HGSS icon compatibility",
+      "Compact 160x144 and responsive widescreen layouts",
+    },
+    known = {
+      "Abilities, breeding, habitats, held items, and forms are not shown unless another mod supplies real data and a page",
+      "Uses engine_internals to preserve the native Pokedex and DexEntry controllers",
+      "Pokemon Yellow printing intentionally keeps the original compact renderer",
+    },
+  },
+  credits = {
+    { who = "Gen1Recomp", for_ = "native Pokedex data, rendering, and mod platform" },
+    { who = "Eevee Expo Data Page resource", for_ = "user-supplied information-layout inspiration" },
+    { who = "Game Freak", for_ = "modern Pokedex information hierarchy inspiration" },
+  },
+  compat = { engine = ">=0.0.0-dev <1.0.0", modApi = 2 },
+}

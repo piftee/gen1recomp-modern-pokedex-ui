@@ -1,0 +1,11 @@
+{
+  "id": "CRYSTAL_251",
+  "name": "Crystal 251 Move Fixture",
+  "version": "0.0.1",
+  "api": 2,
+  "entry": "main.lua",
+  "profile": "content",
+  "priority": 110,
+  "permissions": [],
+  "dependencies": []
+}

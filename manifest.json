@@ -1,0 +1,30 @@
+{
+  "id": "modern_pokedex_ui",
+  "name": "Modern Pokedex UI",
+  "version": "0.1.6",
+  "api": 2,
+  "entry": "main.lua",
+  "profile": "content",
+  "game_version": ">=0.0.0-dev <1.0.0",
+  "category": "UI",
+  "priority": 1120,
+  "dependencies": [],
+  "optional_dependencies": [
+    "modern_bag_ui",
+    "modern_party_ui",
+    "modern_pc_ui",
+    "gen1_modern_ui",
+    "CRYSTAL_251",
+    "useful_move_info",
+    "unique_menu_icons",
+    "HGSS_SPRITES"
+  ],
+  "conflicts": [],
+  "incompatible": [],
+  "permissions": [
+    "engine_internals"
+  ],
+  "experimental": false,
+  "description": "A responsive modern-retro Pokedex with icon cards, live previews, and a redesigned data page.",
+  "github": "piftee/gen1recomp-modern-pokedex-ui"
+}
