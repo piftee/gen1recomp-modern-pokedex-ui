@@ -56,7 +56,14 @@ PC UI 0.2.2, so a sprite selector cannot show one design in battle and a
 different design in the Pokédex, stats screen, or PC details rail.
 Grayscale battle artwork is coloured with that species' own game palette;
 the type palette belongs only to the surrounding card. Already-full-colour
-battle replacements bypass both recolouring steps.
+battle replacements bypass both recolouring steps. Portrait colour protection
+follows the artwork's visible pixels and removes edge-connected matte, so a
+sprite never carries a rectangular backing or shadow into its card.
+
+Type names are translated individually before dual types are joined. Compact
+chips take their three-glyph abbreviation from those translated full names;
+the mod never asks a translation catalog to translate ambiguous English
+abbreviations such as `PSN` or `FLY`.
 
 ## Controls
 
@@ -84,8 +91,9 @@ battle replacements bypass both recolouring steps.
 | Play cry | A on other built-in pages |
 | Return | B |
 
-Scripted one-off Pokédex entries keep their native A/B close behavior. The
-Yellow printer also keeps the original compact printable entry renderer.
+On scripted one-off and newly-caught entries, A advances a page of overflowing
+field notes before closing after the final page; B closes immediately. The
+Yellow printer keeps the original compact printable entry renderer.
 
 ## Optional data pages for other mods
 

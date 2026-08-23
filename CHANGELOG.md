@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.7] - 2026-08-23
+
+### Changed
+
+- Compact INFO now uses the same 52-pixel portrait card height as STATS and
+  devotes the recovered space to a fourth visible field-note line.
+- Compact type labels are derived from each translated full type name, so
+  every language receives consistent three-glyph abbreviations without
+  colliding with unrelated translations of English `PSN`, `FLY`, and similar
+  tokens.
+- Dual-type labels translate their two components before joining them.
+- On scripted and newly-caught entries, A advances overflowing field notes a
+  page at a time and closes only after the final page; B still closes at once.
+
+### Fixed
+
+- Gen1 Modern UI no longer hides the encounter map opened through AREA.
+- Battle portraits now remove edge-connected matte and protect only their
+  visible pixel runs, eliminating the rectangular shadow around the artwork.
+
 ## [0.1.6] - 2026-08-23
 
 ### Added

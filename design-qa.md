@@ -29,6 +29,8 @@ later-generation systems that are absent from the active data model.
 - HGSS icons are fitted by opaque bounds and protected by opaque runs.
 - Large previews resolve `kind = "battle"`, matching combat, Party summary,
   and PC details.
+- Large portraits remove only edge-connected matte and publish pixel-tight
+  true-colour regions, never a rectangular backing.
 - No new Pokémon artwork or ROM-derived asset is included in the package.
 
 ## Layout checks
@@ -46,12 +48,14 @@ later-generation systems that are absent from the active data model.
 ## Behaviour checks
 
 - DATA opens tabbed research only from the modern Pokédex list.
-- Script-driven entries retain native A/B close and callback behavior.
+- Script-driven and newly-caught entries use A to advance unread notes before
+  closing and retain immediate B-close and callback behavior.
 - CRY remains repeatable from the action menu and research pages.
 - FAMILY uses Up/Down for card focus because Left/Right remains reserved for
   tabs; A opens a known member in-place and synchronizes the backing list.
 - INFO uses Up/Down only when wrapped notes exceed its visible lines.
 - MOVES uses Up/Down for selection, A for conditional details, Select for an
   available source switch, and B to return to the list.
-- AREA still opens the native encounter map.
+- AREA still opens the native encounter map, including alongside Gen1 Modern
+  UI where the source-owned Pokédex remains underneath it.
 - Yellow PRNT retains the native printable renderer.

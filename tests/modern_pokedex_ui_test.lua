@@ -51,6 +51,7 @@ local previousMode = PaletteFX.mode
 PaletteFX.setMode("gbc")
 
 local run = T.sdk.loadMods({
+  "mods/modern_party_ui/tests/fixtures/gen1_modern_ui",
   "mods/modern_pokedex_ui/tests/fixtures/dex_extras",
   "mods/modern_pokedex_ui/tests/fixtures/crystal_251_moves",
   "mods/modern_pokedex_ui",
@@ -64,6 +65,17 @@ T.check(type(dexRecord) == "table" and type(dexRecord.new) == "function",
   "the modern Pokedex list is registered")
 T.check(type(entryRecord) == "table" and type(entryRecord.new) == "function",
   "the modern data entry is registered")
+
+run.data.strings = run.data.strings or {}
+run.data.strings.BUG = "INSETO"
+run.data.strings.POISON = "VENENO"
+run.data.strings.FLYING = "VOADOR"
+run.data.strings.DRAGON = "DRAGÃO"
+-- These deliberately collide with English abbreviations. They must never be
+-- consulted now that abbreviations are derived from translated full names.
+run.data.strings.PSN = "VENENOSO STATUS"
+run.data.strings.FLY = "VOAR"
+Strings.load(run.data)
 
 local stack = { states = {} }
 function stack:push(state) self.states[#self.states + 1] = state end
@@ -187,6 +199,14 @@ T.eq(actionZone and actionZone.h, #action.items * 14 + 20,
   "the research card height budgets its heading and every action")
 T.check(actionZone and actionZone.y + actionZone.h <= 132,
   "the final research action stays above the footer")
+action.index = 3
+input.pressed.a = true
+action:update(0)
+input.pressed.a = nil
+local areaMap = stack:top()
+T.check(areaMap and areaMap.modernPokedexAreaMap == true
+    and areaMap.nestSpecies == "FIXMON_A" and areaMap.isOpaque == true,
+  "AREA remains an opaque visible map when Gen1 Modern UI is enabled")
 stack:pop()
 
 -- Closing the list can synchronously push the Start menu through onCancel.
@@ -251,6 +271,15 @@ for _, rect in ipairs(uiRects) do
 end
 T.check(not inheritedClaim,
   "an opaque entry clears inherited list-icon claims before drawing")
+local exactPortraitRuns, broadPortraitClaim = 0, false
+for _, rect in ipairs(uiRects) do
+  if rect.x >= 4 and rect.x < 100 and rect.y >= 21 and rect.y < 90 then
+    if rect.h <= 1 then exactPortraitRuns = exactPortraitRuns + 1 end
+    if rect.h > 2 then broadPortraitClaim = true end
+  end
+end
+T.check(exactPortraitRuns > 0 and not broadPortraitClaim,
+  "battle portraits protect only visible pixels, without a rectangular matte")
 local usedSpeciesPalette = false
 for _, species in ipairs(portraitPaletteSpecies) do
   if species == "FIXMON_A" then usedSpeciesPalette = true break end
@@ -476,10 +505,10 @@ Font.draw = realCompactFont
 responsiveEntry.def.dexEntry.text = originalDexText
 local noteLines = 0
 for _, item in ipairs(compactInfoText) do
-  if item.y >= 101 and item.y <= 125 then noteLines = noteLines + 1 end
+  if item.y >= 92 and item.y <= 122 then noteLines = noteLines + 1 end
 end
-T.eq(noteLines, 3,
-  "compact INFO reserves three readable lines for flavour text")
+T.eq(noteLines, 4,
+  "compact INFO reserves four readable lines for flavour text")
 T.check(responsiveEntry.modernInfoCanScroll,
   "compact INFO exposes overflow notes instead of discarding them")
 press(responsiveEntry, "down")
@@ -488,17 +517,79 @@ T.eq(responsiveEntry.modernInfoScroll, 1,
 press(responsiveEntry, "up")
 T.eq(responsiveEntry.modernInfoScroll, 0,
   "UP returns to the previous compact field-note line")
+
+-- Catch/script entry pages are not tabbed. A advances their overflowing
+-- notes before it closes the page, matching the original page-continue flow.
+local savedCatchText = responsiveEntry.def.dexEntry.text
+responsiveEntry.def.dexEntry.text = "THIS NEWLY CAUGHT POKEMON HAS A VERY LONG "
+  .. "DESCRIPTION THAT NEEDS MORE THAN ONE COMPACT PAGE TO SHOW EVERY WORD "
+  .. "WITHOUT DISCARDING THE END OF ITS FIELD NOTES."
+local catchDone = false
+local caughtEntry = entryRecord.new(game,
+  { species = "FIXMON_A", forceOwned = true },
+  function() catchDone = true end)
+stack:push(caughtEntry)
+caughtEntry:draw()
+local catchDepth = #stack.states
+press(caughtEntry, "a")
+T.check(caughtEntry.modernInfoScroll > 0 and #stack.states == catchDepth,
+  "A advances overflowing notes on a newly-caught entry before closing")
+while caughtEntry.modernInfoScroll
+    < math.max(0, #(caughtEntry.modernInfoLines or {})
+      - (caughtEntry.modernInfoVisible or 0)) do
+  press(caughtEntry, "a")
+end
+press(caughtEntry, "a")
+T.check(#stack.states == catchDepth - 1 and catchDone,
+  "A closes the newly-caught entry after its final notes page")
+responsiveEntry.def.dexEntry.text = savedCatchText
+
 local compactInfoZones = responsiveEntry:sgbPalettes(game)
 local shortPortraitZone, tallPortraitZone = false, false
 for _, zone in ipairs(compactInfoZones) do
-  if zone.x == 4 and zone.y == 21 and zone.w == 52 and zone.h == 61 then
+  if zone.x == 4 and zone.y == 21 and zone.w == 52 and zone.h == 52 then
     shortPortraitZone = true
   elseif zone.x == 4 and zone.y == 21 and zone.h == 109 then
     tallPortraitZone = true
   end
 end
 T.check(shortPortraitZone and not tallPortraitZone,
-  "compact INFO stops the portrait palette before the notes card")
+  "compact INFO matches the STAT portrait size and stops before notes")
+
+local savedTypes = responsiveEntry.def.types
+responsiveEntry.def.types = { "BUG", "POISON" }
+local translatedCompactTypes = {}
+Font.draw = function(value, x, y)
+  translatedCompactTypes[tostring(value)] = true
+  return realCompactFont(value, x, y)
+end
+responsiveEntry.modernDexPage = 1
+responsiveEntry:draw()
+Font.draw = realCompactFont
+T.check(translatedCompactTypes.INS and translatedCompactTypes.VEN
+    and not translatedCompactTypes["VENENOSO STATUS"],
+  "compact type chips abbreviate translated full names without key collisions")
+
+graphics.getPixelDimensions = function() return 1600, 720 end
+local translatedPair = {}
+dex.index = 1
+Font.draw = function(value, x, y)
+  translatedPair[tostring(value)] = true
+  return realCompactFont(value, x, y)
+end
+dex:draw()
+Font.draw = realCompactFont
+local sawTranslatedPair = false
+for value in pairs(translatedPair) do
+  if value:find("INSETO/VEN", 1, true) == 1 then
+    sawTranslatedPair = true
+    break
+  end
+end
+T.check(sawTranslatedPair,
+  "combined types translate each component before they are joined")
+responsiveEntry.def.types = savedTypes
+graphics.getPixelDimensions = function() return 640, 576 end
 
 responsiveEntry.modernDexPage = 2
 local compactStatsText = {}

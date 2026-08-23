@@ -53,6 +53,7 @@ return function(mod, compatibility)
   local fittedHgss = {}
   local authoredIconRunCache = {}
   local spriteCache = {}
+  local spriteRunCache = {}
   local inkShader
 
   local function gray(value)
@@ -92,9 +93,9 @@ return function(mod, compatibility)
     return text:sub(1, spans[count].to) .. "."
   end
 
-  local function drawText(text, x, y, maxWidth, shade)
-    text = fitText(Strings(tostring(text or "")),
-      maxWidth or Font.width(tostring(text or "")))
+  local function drawRawText(text, x, y, maxWidth, shade)
+    text = tostring(text or "")
+    text = fitText(text, maxWidth or Font.width(text))
     love.graphics.push("all")
     local shader = shaderForInk()
     if shader then
@@ -108,6 +109,10 @@ return function(mod, compatibility)
     return Font.width(text)
   end
 
+  local function drawText(text, x, y, maxWidth, shade)
+    return drawRawText(Strings(tostring(text or "")), x, y, maxWidth, shade)
+  end
+
   local function drawRight(text, right, y, maxWidth, shade)
     text = fitText(Strings(tostring(text or "")), maxWidth)
     local width = Font.width(text)
@@ -117,7 +122,13 @@ return function(mod, compatibility)
 
   local function drawCentered(text, x, y, width, shade)
     text = fitText(Strings(tostring(text or "")), width)
-    drawText(text, x + math.floor((width - Font.width(text)) / 2),
+    drawRawText(text, x + math.floor((width - Font.width(text)) / 2),
+      y, width, shade)
+  end
+
+  local function drawRawCentered(text, x, y, width, shade)
+    text = fitText(tostring(text or ""), width)
+    drawRawText(text, x + math.floor((width - Font.width(text)) / 2),
       y, width, shade)
   end
 
@@ -204,14 +215,6 @@ return function(mod, compatibility)
   local function basePalette(game)
     return PaletteFX.pal(game.data, "BLUEMON")
       or PaletteFX.pal(game.data, "MEWMON") or PaletteFX.GRAYS
-  end
-
-  local function finalColor(colors, shade)
-    local effective = PaletteFX.effectiveColors(colors)
-    if not effective then return nil end
-    local index = shade >= 0.84 and 1 or shade >= 0.50 and 2
-      or shade >= 0.17 and 3 or 4
-    return effective[index]
   end
 
   local function backdrop(layout)
@@ -449,6 +452,85 @@ return function(mod, compatibility)
       regions, exactRuns)
   end
 
+  local function visibleRuns(data)
+    if not data or type(data.getDimensions) ~= "function"
+        or type(data.getPixel) ~= "function" then return nil end
+    local width, height = data:getDimensions()
+    local runs = {}
+    for y = 0, height - 1 do
+      local start
+      for x = 0, width do
+        local visible = false
+        if x < width then
+          local _, _, _, alpha = data:getPixel(x, y)
+          visible = (alpha or 1) > 0
+        end
+        if visible and not start then
+          start = x
+        elseif not visible and start then
+          runs[#runs + 1] = { x = start, y = y, w = x - start }
+          start = nil
+        end
+      end
+    end
+    return runs
+  end
+
+  local function preparedSprite(path, key, colors)
+    local cached = spriteCache[key]
+    if cached ~= nil then return cached or nil, spriteRunCache[key] end
+    cached = false
+    local runs
+    if love.image and love.image.newImageData then
+      local okData, data = pcall(Assets.imageData, path)
+      if okData and data and type(data.mapPixel) == "function" then
+        local width, height = data:getDimensions()
+        local outside, queueX, queueY, head = {}, {}, {}, 1
+        local function pixelIndex(x, y) return y * width + x + 1 end
+        local function matte(x, y)
+          local r, g, b, a = data:getPixel(x, y)
+          return a <= 0 or (r > 0.83 and g > 0.83 and b > 0.83)
+        end
+        local function visit(x, y)
+          if x < 0 or y < 0 or x >= width or y >= height then return end
+          local index = pixelIndex(x, y)
+          if outside[index] or not matte(x, y) then return end
+          outside[index] = true
+          queueX[#queueX + 1], queueY[#queueY + 1] = x, y
+        end
+        for x = 0, width - 1 do visit(x, 0); visit(x, height - 1) end
+        for y = 1, height - 2 do visit(0, y); visit(width - 1, y) end
+        while head <= #queueX do
+          local x, y = queueX[head], queueY[head]
+          head = head + 1
+          visit(x - 1, y); visit(x + 1, y)
+          visit(x, y - 1); visit(x, y + 1)
+        end
+        data:mapPixel(function(x, y, r, g, b, a)
+          if a <= 0 or outside[pixelIndex(x, y)] then return r, g, b, 0 end
+          if colors then
+            local color = r > 0.83 and colors[1]
+              or r > 0.5 and colors[2]
+              or r > 0.17 and colors[3] or colors[4]
+            return color[1] / 255, color[2] / 255,
+              color[3] / 255, a
+          end
+          return r, g, b, a
+        end)
+        runs = visibleRuns(data)
+        local made, image = pcall(love.graphics.newImage, data)
+        cached = made and image or false
+        if cached and cached.setFilter then cached:setFilter("nearest", "nearest") end
+      end
+    end
+    if not cached then
+      local ok, image = pcall(Assets.image, path)
+      cached = ok and image or false
+    end
+    spriteCache[key], spriteRunCache[key] = cached, runs
+    return cached or nil, runs
+  end
+
   local function spriteFor(game, def)
     if not def then return nil, false end
     -- Deliberately ask for the battle presentation. Sprite selectors are
@@ -459,17 +541,14 @@ return function(mod, compatibility)
     if not path then return nil, false end
 
     local function rawSprite()
-      local key = path .. "#raw"
-      local cached = spriteCache[key]
-      if cached == nil then
-        local ok, image = pcall(Assets.image, path)
-        cached = ok and image or false
-        spriteCache[key] = cached
-      end
-      return cached or nil
+      local image, runs = preparedSprite(path, path .. "#raw")
+      return image, runs
     end
 
-    if trueColor then return rawSprite(), true end
+    if trueColor then
+      local image, runs = rawSprite()
+      return image, true, nil, runs
+    end
 
     -- Bake the grayscale battle artwork through the species' own Pokémon
     -- palette. The surrounding card remains type-coloured, but its portrait
@@ -487,54 +566,10 @@ return function(mod, compatibility)
       values[#values + 1] = tostring(color[3] or 0)
     end
     local key = path .. "#species:" .. table.concat(values, ":")
-    local cached = spriteCache[key]
-    if cached == nil then
-      cached = false
-      if colors and love.image and love.image.newImageData then
-        local okData, data = pcall(Assets.imageData, path)
-        if okData and data then
-          local width, height = data:getDimensions()
-          local outside, queueX, queueY, head = {}, {}, {}, 1
-          local function pixelIndex(x, y) return y * width + x + 1 end
-          local function matte(x, y)
-            local r, g, b, a = data:getPixel(x, y)
-            return a <= 0 or (r > 0.83 and g > 0.83 and b > 0.83)
-          end
-          local function visit(x, y)
-            if x < 0 or y < 0 or x >= width or y >= height then return end
-            local index = pixelIndex(x, y)
-            if outside[index] or not matte(x, y) then return end
-            outside[index] = true
-            queueX[#queueX + 1], queueY[#queueY + 1] = x, y
-          end
-          for x = 0, width - 1 do visit(x, 0); visit(x, height - 1) end
-          for y = 1, height - 2 do visit(0, y); visit(width - 1, y) end
-          while head <= #queueX do
-            local x, y = queueX[head], queueY[head]
-            head = head + 1
-            visit(x - 1, y); visit(x + 1, y)
-            visit(x, y - 1); visit(x, y + 1)
-          end
-          data:mapPixel(function(x, y, r, g, b, a)
-            if a <= 0 or outside[pixelIndex(x, y)] then
-              return r, g, b, 0
-            end
-            local color = r > 0.83 and colors[1]
-              or r > 0.5 and colors[2]
-              or r > 0.17 and colors[3] or colors[4]
-            return color[1] / 255, color[2] / 255,
-              color[3] / 255, a
-          end)
-          local made, image = pcall(love.graphics.newImage, data)
-          cached = made and image or false
-          if cached and cached.setFilter then
-            cached:setFilter("nearest", "nearest")
-          end
-        end
-      end
-      spriteCache[key] = cached
-    end
-    return cached or rawSprite(), cached and true or false, artPalette
+    local image, runs = preparedSprite(path, key, colors)
+    if image then return image, true, artPalette, runs end
+    local raw, rawRuns = rawSprite()
+    return raw, false, artPalette, rawRuns
   end
 
   local function drawSprite(game, def, rect, regions, known, colors, faceShade)
@@ -543,7 +578,7 @@ return function(mod, compatibility)
         rect.w, DARK)
       return
     end
-    local image, protected, artPalette = spriteFor(game, def)
+    local image, protected, artPalette, runs = spriteFor(game, def)
     if not image then return end
     local sw, sh = image:getDimensions()
     local scale = math.min(1, rect.w / math.max(1, sw),
@@ -555,18 +590,6 @@ return function(mod, compatibility)
       shader = PaletteFX.keyedShader and PaletteFX.keyedShader() or nil
       protected = shader ~= nil
     end
-    if protected then
-      local background = finalColor(colors or paletteFor(def),
-        faceShade == nil and LIGHT or faceShade)
-      if background then
-        love.graphics.push("all")
-        love.graphics.setColor(background[1] / 255, background[2] / 255,
-          background[3] / 255, 1)
-        love.graphics.rectangle("fill", x - 1, y - 1,
-          sw * scale + 2, sh * scale + 2)
-        love.graphics.pop()
-      end
-    end
     love.graphics.push("all")
     if shader then
       love.graphics.setShader(shader)
@@ -576,22 +599,26 @@ return function(mod, compatibility)
     love.graphics.draw(image, x, y, 0, scale, scale)
     love.graphics.pop()
     if protected then
-      regions[#regions + 1] = { x = x - 1, y = y - 1,
-        w = sw * scale + 2, h = sh * scale + 2 }
+      for _, run in ipairs(runs or {}) do
+        regions[#regions + 1] = {
+          x = x + run.x * scale, y = y + run.y * scale,
+          w = math.max(1, run.w * scale), h = math.max(1, scale),
+        }
+      end
     end
   end
 
-  local function typeName(id)
-    return id and TypeChart.displayName(id) or "---"
+  local function translatedTypeName(id)
+    if not id then return "---" end
+    return Strings(TypeChart.displayName(id), "pokedex.type")
   end
 
-  local TYPE_SHORT = {
-    NORMAL = "NOR", FIGHTING = "FGT", FLYING = "FLY", POISON = "PSN",
-    GROUND = "GRD", ROCK = "RCK", BUG = "BUG", GHOST = "GHO",
-    FIRE = "FIR", WATER = "WAT", GRASS = "GRS", ELECTRIC = "ELC",
-    PSYCHIC_TYPE = "PSY", PSYCHIC = "PSY", ICE = "ICE", DRAGON = "DRG",
-    DARK = "DRK", FAIRY = "FAI", STEEL = "STL",
-  }
+  local function shortTypeName(id)
+    local name = translatedTypeName(id)
+    local spans = Font.split(name)
+    if #spans <= 3 then return name end
+    return name:sub(1, spans[3].to)
+  end
 
   local function drawBall(x, y, caught)
     gray(caught and BLACK or DARK)
@@ -744,17 +771,15 @@ return function(mod, compatibility)
     end
     if known then
       local types = def.types or {}
-      local label = types[1] and typeName(types[1]) or nil
+      local label = types[1] and translatedTypeName(types[1]) or nil
       if label and types[2] and types[2] ~= types[1] then
-        label = label .. "/" .. typeName(types[2])
+        label = label .. "/" .. translatedTypeName(types[2])
         if Font.width(label) > rect.w - pad * 2 then
-          label = (TYPE_SHORT[tostring(types[1]):upper()] or typeName(types[1]))
-            .. "/" .. (TYPE_SHORT[tostring(types[2]):upper()]
-              or typeName(types[2]))
+          label = shortTypeName(types[1]) .. "/" .. shortTypeName(types[2])
         end
       end
       if label then
-        drawCentered(label, rect.x + pad, rect.y + rect.h - 14,
+        drawRawCentered(label, rect.x + pad, rect.y + rect.h - 14,
           rect.w - pad * 2, WHITE)
       end
     end
@@ -844,6 +869,29 @@ return function(mod, compatibility)
     local top = screen.game.stack and screen.game.stack:top()
     if not top or top == screen or top.modernDexOwner == screen then return end
     if type(top.items) ~= "table" or type(top.update) ~= "function" then return end
+    -- Gen1 Modern UI cannot transactionally present its Town Map while this
+    -- source-owned Pokédex remains underneath: our adapter intentionally
+    -- declines suppression so this mod keeps its own canvas. Mark AREA maps
+    -- as source-owned opaque screens, allowing the native map renderer to
+    -- remain visible instead of being hidden behind the Pokédex.
+    if compatibility.gen1ModernUi and not top.modernDexAreaBridge then
+      local area = top.items[3]
+      if area and area.label == Strings("AREA")
+          and type(area.onSelect) == "function" then
+        local openArea = area.onSelect
+        area.onSelect = function(...)
+          local result = openArea(...)
+          local map = screen.game.stack and screen.game.stack:top()
+          if map and map.nestSpecies then
+            map.screenId = "ModernPokedexAreaMap"
+            map.modernPokedexAreaMap = true
+            map.isOpaque = true
+          end
+          return result
+        end
+      end
+      top.modernDexAreaBridge = true
+    end
     top.modernDexOwner = screen
     top.draw = drawActions
     top.uiSize = function() return screen:uiSize() end
@@ -946,7 +994,7 @@ return function(mod, compatibility)
     local profileW = wide and 96 or 58
     local profile = { x = 4, y = 21, w = profileW, h = 109 }
     local infoProfile = wide and profile
-      or { x = 4, y = 21, w = 52, h = 61 }
+      or { x = 4, y = 21, w = 52, h = 52 }
     local statsProfile = wide and profile
       or { x = 4, y = 21, w = 52, h = 52 }
     return {
@@ -963,11 +1011,11 @@ return function(mod, compatibility)
         w = width - profileW - 12, h = 109 },
       info = wide and { x = 8 + profileW, y = 21,
         w = width - profileW - 12, h = 49 }
-        or { x = 60, y = 21, w = width - 64, h = 61 },
+        or { x = 60, y = 21, w = width - 64, h = 52 },
       description = { x = wide and (8 + profileW) or 4,
-        y = wide and 74 or 86,
+        y = wide and 74 or 77,
         w = wide and (width - profileW - 12) or (width - 8),
-        h = wide and 56 or 44 },
+        h = wide and 56 or 53 },
     }
   end
 
@@ -988,7 +1036,7 @@ return function(mod, compatibility)
   local function drawTypeChip(label, x, y, width)
     gray(DARK)
     chamfer("fill", x, y, width, 11, 2)
-    drawCentered(label, x + 2, y + 2, width - 4, WHITE)
+    drawRawCentered(label, x + 2, y + 2, width - 4, WHITE)
   end
 
   local function drawEntryHeader(state, layout)
@@ -1090,7 +1138,7 @@ return function(mod, compatibility)
     end
     if e.kind then
       drawText(e.kind, layout.info.x + 6,
-        layout.info.y + (layout.wide and 16 or 29),
+        layout.info.y + (layout.wide and 16 or 27),
         layout.info.w - 12, layout.wide and BLACK or DARK)
     end
     local chipY = layout.info.y + layout.info.h - 16
@@ -1098,13 +1146,13 @@ return function(mod, compatibility)
     local two = types[2] and types[2] ~= types[1]
     local chipW = two and math.floor((available - 3) / 2) or available
     if types[1] then
-      local label = layout.wide and typeName(types[1])
-        or (TYPE_SHORT[tostring(types[1]):upper()] or typeName(types[1]))
+      local label = layout.wide and translatedTypeName(types[1])
+        or shortTypeName(types[1])
       drawTypeChip(label, layout.info.x + 6, chipY, chipW)
     end
     if types[1] and two then
-      local label = layout.wide and typeName(types[2])
-        or (TYPE_SHORT[tostring(types[2]):upper()] or typeName(types[2]))
+      local label = layout.wide and translatedTypeName(types[2])
+        or shortTypeName(types[2])
       drawTypeChip(label, layout.info.x + 9 + chipW,
         chipY, chipW)
     end
@@ -1155,10 +1203,10 @@ return function(mod, compatibility)
     if sameLine then
       drawText(notesLabel, descX, layout.description.y + 4,
         math.max(40, descW - measureW - 8), DARK)
-      y, maxLines = layout.description.y + 15, layout.wide and 4 or 3
+      y, maxLines = layout.description.y + 15, 4
     else
       drawText("NOTES", descX, layout.description.y + 14, 48, DARK)
-      y, maxLines = layout.description.y + 25, layout.wide and 3 or 2
+      y, maxLines = layout.description.y + 25, layout.wide and 3 or 3
     end
     local lines = wrappedLines(notes, descW)
     state.modernInfoLines = lines
@@ -1832,7 +1880,8 @@ return function(mod, compatibility)
       or Strings("LEVEL %s", tostring(row.source or "?"))
     drawText(source, x + 6, y + 15, w - 70, DARK)
     if move.type then
-      drawTypeChip(typeName(move.type), x + w - (layout.wide and 70 or 48),
+      drawTypeChip(translatedTypeName(move.type),
+        x + w - (layout.wide and 70 or 48),
         y + 8, layout.wide and 64 or 42)
     end
 
@@ -2103,9 +2152,19 @@ return function(mod, compatibility)
       drawRight(right, layout.width - 5, layout.footerY + 2,
         layout.wide and 120 or (state.modernMoveDetail and 48 or 80), LIGHT)
     else
-      drawText("A/B CLOSE", 5, layout.footerY + 2, 80, WHITE)
-      drawRight("MODERN RESEARCH FILE", layout.width - 5,
-        layout.footerY + 2, 152, LIGHT)
+      local lines = state.modernInfoLines or {}
+      local visible = state.modernInfoVisible or #lines
+      local hasMore = (state.modernInfoScroll or 0)
+        < math.max(0, #lines - visible)
+      drawText(hasMore and "A MORE  B CLOSE" or "A/B CLOSE",
+        5, layout.footerY + 2, hasMore and 112 or 80, WHITE)
+      if layout.wide and not hasMore then
+        drawRight("MODERN RESEARCH FILE", layout.width - 5,
+          layout.footerY + 2, 152, LIGHT)
+      elseif not hasMore then
+        drawRight("RESEARCH", layout.width - 5,
+          layout.footerY + 2, 64, LIGHT)
+      end
     end
     for _, rect in ipairs(regions) do
       PaletteFX.markTrueColor(rect.x, rect.y, rect.w, rect.h)
@@ -2339,6 +2398,16 @@ return function(mod, compatibility)
     state.update = function(self, dt)
       self.modernDexClock = (self.modernDexClock + 1) % 32000
       if not self.modernDexTabbed then
+        local input = self.game.input
+        local lines = self.modernInfoLines or {}
+        local visible = self.modernInfoVisible or #lines
+        local maxScroll = math.max(0, #lines - visible)
+        if input:wasPressed("a")
+            and (self.modernInfoScroll or 0) < maxScroll then
+          require("src.core.Sound").play(self.game.data, "Press_AB")
+          moveInfoScroll(self, math.max(1, visible))
+          return
+        end
         nativeUpdate(self, dt)
         return
       end

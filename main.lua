@@ -13,6 +13,7 @@ return function(mod)
   local crystal251 = mod.find("CRYSTAL_251")
   local usefulMoveInfo = mod.find("useful_move_info")
   local compatibility = {
+    gen1ModernUi = mod.find("gen1_modern_ui") ~= nil,
     hgssSprites = mod.find("HGSS_SPRITES") ~= nil,
     uniqueMenuIcons = mod.find("unique_menu_icons") ~= nil,
     crystalMoveScripts = crystal251 and crystal251.exports
