@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.8] - 2026-08-23
+
+### Fixed
+
+- Integrated Wilds of Kanto through its exported follower-sprite resolver,
+  preserving configured artwork and idle/walk frames even when another
+  late-loading icon mod replaces the shared PartyMenu renderer.
+- Wilds icons keep their authored colours on selected Pokédex rows, and only
+  their opaque pixels bypass the screen palette so transparent padding cannot
+  produce a square backing.
+- Compact stats use the conventional `ATK` Attack, `SPE` Speed, and Gen I
+  `SPC` Special labels.
+- Compact INFO extends its notes card through the available lower gap so the
+  fourth flavour-text row is never cut through by the frame.
+- Research-page footers allocate their left and right control hints from the
+  real available width; tight layouts retain complete labels without dots.
+- The compact Pokédex footer now says `SEEN xxx` instead of repeating the
+  caught count already presented in the header.
+
 ## [0.1.7] - 2026-08-23
 
 ### Changed

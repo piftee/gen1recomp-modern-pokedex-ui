@@ -43,6 +43,10 @@ fill a reference layout.
 Pokédex icons always go through the same shared menu-icon renderer used by the
 party:
 
+- **Wilds of Kanto** is read through its exported follower-sprite selector,
+  preserving its configured artwork and authored idle/walk frames even when a
+  later-loading icon mod replaces the shared renderer. Selection animation
+  never darkens or recolours the sprite.
 - **Unique Menu Icons** retains its authored full-colour icon sets and its
   palette-aware Original mode. Full-colour protection follows only visible
   pixels, so transparent icon space never becomes a white backing square.

@@ -1,7 +1,7 @@
 {
   "id": "modern_pokedex_ui",
   "name": "Modern Pokedex UI",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "api": 2,
   "entry": "main.lua",
   "profile": "content",
@@ -17,7 +17,8 @@
     "CRYSTAL_251",
     "useful_move_info",
     "unique_menu_icons",
-    "HGSS_SPRITES"
+    "HGSS_SPRITES",
+    "overworld_wild_spawns"
   ],
   "conflicts": [],
   "incompatible": [],

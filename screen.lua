@@ -52,9 +52,22 @@ return function(mod, compatibility)
 
   local fittedHgss = {}
   local authoredIconRunCache = {}
+  local wildsIconDefs = {}
+  local wildsIconAlphaMasks = {}
   local spriteCache = {}
   local spriteRunCache = {}
   local inkShader
+
+  if Assets.register then
+    Assets.register(function()
+      fittedHgss = {}
+      authoredIconRunCache = {}
+      wildsIconDefs = {}
+      wildsIconAlphaMasks = {}
+      spriteCache = {}
+      spriteRunCache = {}
+    end)
+  end
 
   local function gray(value)
     love.graphics.setColor(value, value, value, 1)
@@ -437,18 +450,158 @@ return function(mod, compatibility)
     return true
   end
 
+  -- Wilds of Kanto publishes its configured follower sheets through a stable
+  -- resolver. Use that API directly so a later icon mod can replace the
+  -- shared PartyMenu hook without making Wilds artwork disappear here.
+  local function wildsIconDef(game, mon)
+    local exports = compatibility.wildsOfKantoExports
+    local resolve = exports and exports.resolveFollowerSprite
+    if type(resolve) ~= "function" then return nil end
+    local key = table.concat({
+      tostring(mon.species or ""), mon.shiny and "s" or "n",
+      tostring(mon.form or ""),
+    }, "|")
+    local cached = wildsIconDefs[key]
+    if cached ~= nil then return cached or nil end
+    local ok, def = pcall(resolve, {
+      species = mon.species,
+      shiny = mon.shiny == true,
+      form = mon.form,
+      surface = "land",
+      role = "party_menu",
+      game = game,
+    })
+    if not ok or type(def) ~= "table" or type(def.image) ~= "string"
+        or def.image == "" then
+      wildsIconDefs[key] = false
+      return nil
+    end
+    wildsIconDefs[key] = def
+    return def
+  end
+
+  local function wildsOpaqueRuns(path, frameX, frameY, frameW, frameH)
+    local cached = wildsIconAlphaMasks[path]
+    if cached == nil then
+      local ok, data, iw, ih = pcall(function()
+        local decoded = Assets.imageData(path)
+        local width, height = decoded:getDimensions()
+        return decoded, width, height
+      end)
+      if not ok or not data or not iw or not ih then
+        wildsIconAlphaMasks[path] = false
+        return nil
+      end
+      cached = { data = data, iw = iw, ih = ih, frames = {} }
+      wildsIconAlphaMasks[path] = cached
+    elseif cached == false then
+      return nil
+    end
+
+    frameX = math.max(0, math.floor(tonumber(frameX) or 0))
+    frameY = math.max(0, math.floor(tonumber(frameY) or 0))
+    frameW = math.min(math.floor(tonumber(frameW) or cached.iw),
+      cached.iw - frameX)
+    frameH = math.min(math.floor(tonumber(frameH) or cached.ih),
+      cached.ih - frameY)
+    if frameW <= 0 or frameH <= 0 then return nil end
+    local key = table.concat({ frameX, frameY, frameW, frameH }, ":")
+    if cached.frames[key] ~= nil then return cached.frames[key] or nil end
+
+    local ok, runs = pcall(function()
+      local result = {}
+      for py = 0, frameH - 1 do
+        local start
+        for px = 0, frameW - 1 do
+          local _, _, _, alpha = cached.data:getPixel(frameX + px, frameY + py)
+          local opaque = alpha == nil or alpha > 0.01
+          if opaque and start == nil then start = px end
+          if start ~= nil and (not opaque or px == frameW - 1) then
+            local finish = opaque and px or px - 1
+            result[#result + 1] = {
+              x = start, y = py, w = finish - start + 1,
+            }
+            start = nil
+          end
+        end
+      end
+      return result
+    end)
+    if not ok or #runs == 0 then
+      cached.frames[key] = false
+      return nil
+    end
+    cached.frames[key] = runs
+    return runs
+  end
+
+  local function drawWildsIcon(game, mon, x, y, target, focused, counter,
+      regions)
+    local def = wildsIconDef(game, mon)
+    if not def then return false end
+    local okImage, image = pcall(Assets.image, def.image)
+    if not okImage or not image then return false end
+
+    local iw, ih
+    if type(image.getDimensions) == "function" then
+      iw, ih = image:getDimensions()
+    elseif type(image.getWidth) == "function"
+        and type(image.getHeight) == "function" then
+      iw, ih = image:getWidth(), image:getHeight()
+    end
+    iw, ih = tonumber(iw), tonumber(ih)
+    if not iw or not ih or iw <= 0 or ih <= 0
+        or not love.graphics.newQuad then return false end
+
+    local frames = math.max(1, math.floor(tonumber(def.frames) or 1))
+    local frameW = math.min(iw,
+      math.max(1, math.floor(tonumber(def.frameWidth) or iw)))
+    local defaultFrameH = frames > 1 and math.floor(ih / frames) or ih
+    local frameH = math.min(ih,
+      math.max(1, math.floor(tonumber(def.frameHeight) or defaultFrameH)))
+    local frame = 0
+    if focused and frames >= 4
+        and math.floor((tonumber(counter) or 0) / 5) % 2 == 1 then
+      frame = 3
+    end
+    frame = math.min(frames - 1, frame)
+    local frameY = math.min(math.max(0, ih - frameH), frame * frameH)
+    local quad = love.graphics.newQuad(0, frameY, frameW, frameH, iw, ih)
+    local scale = math.min(1, target / frameW, target / frameH)
+    local drawW, drawH = frameW * scale, frameH * scale
+    local drawX = math.floor(x + (target - drawW) / 2 + 0.5)
+    local drawY = math.floor(y + (target - drawH) / 2 + 0.5)
+
+    love.graphics.push("all")
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(image, quad, drawX, drawY, 0, scale, scale)
+    love.graphics.pop()
+    if def.trueColor ~= false then
+      for _, run in ipairs(wildsOpaqueRuns(
+          def.image, 0, frameY, frameW, frameH) or {}) do
+        regions[#regions + 1] = {
+          x = drawX + run.x * scale, y = drawY + run.y * scale,
+          w = math.max(1, run.w * scale), h = math.max(1, scale),
+        }
+      end
+    end
+    return true
+  end
+
   local function drawIcon(game, def, x, y, target, selected, counter,
       regions)
     if not (def and game.data.icons) then return end
     local mon = syntheticMon(def)
+    if compatibility.wildsOfKanto and drawWildsIcon(game, mon, x, y,
+        target, selected, counter, regions) then return end
     local entry, path = iconEntry(game, mon)
     if isHgss(entry, path) and drawHgss(game, mon, entry, x, y, target,
-        selected, counter, regions) then return end
+        false, counter, regions) then return end
     local exactRuns = authoredIcon(entry, path)
       and authoredIconRuns(game, mon, entry) or nil
     collectSharedIcon(game, mon,
       x + math.floor((target - 16) / 2),
-      y + math.floor((target - 16) / 2), selected, counter,
+      y + math.floor((target - 16) / 2), false, counter,
       regions, exactRuns)
   end
 
@@ -717,7 +870,7 @@ return function(mod, compatibility)
       local colors = row.seen and paletteFor(def) or basePalette(screen.game)
       if row.seen then
         drawIcon(screen.game, def, rect.x + 4, rect.y + 1, 17,
-          false, screen.modernDexClock, regions)
+          selected, screen.modernDexClock, regions)
       else
         drawCentered("?", rect.x + 4, rect.y + 6, 17, DARK)
       end
@@ -796,10 +949,12 @@ return function(mod, compatibility)
         layout.footerY + 2, layout.width - 168, LIGHT)
       drawRight("B BACK", layout.width - 5, layout.footerY + 2, 56, WHITE)
     else
-      drawText(("S%03d C%03d"):format(seen, owned),
-        5, layout.footerY + 2, 72, WHITE)
-      drawRight("A OPEN  B BACK", layout.width - 5,
-        layout.footerY + 2, 112, WHITE)
+      local seenLabel = ("SEEN %03d"):format(seen)
+      local seenWidth = drawText(seenLabel,
+        5, layout.footerY + 2, Font.width(seenLabel), WHITE)
+      local action = layout.width >= 178 and "A OPEN B BACK" or "A OPEN B"
+      drawRight(action, layout.width - 5, layout.footerY + 2,
+        math.max(0, layout.width - 16 - seenWidth), WHITE)
     end
     local meterW = math.max(1, layout.width - 10)
     local ownedW = math.floor(meterW * owned / math.max(1, total))
@@ -1015,7 +1170,10 @@ return function(mod, compatibility)
       description = { x = wide and (8 + profileW) or 4,
         y = wide and 74 or 77,
         w = wide and (width - profileW - 12) or (width - 8),
-        h = wide and 56 or 53 },
+        -- Compact INFO has four 8px note rows. Let the card use the small
+        -- gap above the footer so the fourth row stays inside its inner face
+        -- instead of being bisected by the lower frame.
+        h = 56 },
     }
   end
 
@@ -1258,10 +1416,11 @@ return function(mod, compatibility)
   end
 
   local STAT_ROWS = {
-    { "HP", "hp", "GREENMON" }, { "ATTACK", "attack", "REDMON" },
-    { "DEFENSE", "defense", "BROWNMON" },
-    { "SPEED", "speed", "BLUEMON" },
-    { "SPECIAL", "special", "PURPLEMON" },
+    { "HP", "hp", "GREENMON", "HP" },
+    { "ATTACK", "attack", "REDMON", "ATK" },
+    { "DEFENSE", "defense", "BROWNMON", "DEF" },
+    { "SPEED", "speed", "BLUEMON", "SPE" },
+    { "SPECIAL", "special", "PURPLEMON", "SPC" },
   }
 
   local function growthLabel(id)
@@ -1371,7 +1530,7 @@ return function(mod, compatibility)
     local y = rowsY
     for _, row in ipairs(availableRows) do
       local value = stats[row[2]]
-      drawText(layout.wide and row[1] or row[1]:sub(1, 3),
+      drawText(layout.wide and row[1] or row[4],
         main.x + 6, y + 1, labelW - 2, BLACK)
       gray(BLACK)
       love.graphics.rectangle("fill", barX, y + 2, barW,
@@ -2113,6 +2272,7 @@ return function(mod, compatibility)
     love.graphics.rectangle("fill", 0, layout.footerY,
       layout.width, SCREEN_H - layout.footerY)
     if state.modernDexTabbed then
+      local tight = not layout.wide and layout.width < 176
       local right
       if state.modernMoveDetail then
         right = "B LIST"
@@ -2126,31 +2286,37 @@ return function(mod, compatibility)
         right = type(page.footer) == "function"
           and page.footer(pageContext(state, layout, regions)) or page.footer
       elseif page.onAction then
-        right = "A ACTION  B BACK"
+        right = tight and "A ACT B BACK" or "A ACTION  B BACK"
       else
-        right = "A CRY  B BACK"
+        right = layout.wide and "A CRY  B BACK" or "A CRY B BACK"
       end
       local left
       local roomy = layout.width >= 300
       if state.modernMoveDetail then
         left = layout.wide and "MOVE DETAILS" or "MOVE DATA"
       elseif page.id == "family" then
-        left = roomy and "L/R  U/D SELECT" or "L/R U/D"
+        left = roomy and "L/R  U/D SELECT"
+          or tight and "LR UD" or "L/R U/D"
       elseif page.id == "moves" then
-        left = roomy and "L/R  U/D MOVE" or "L/R U/D"
+        left = roomy and "L/R  U/D MOVE"
+          or tight and "LR UD" or "L/R U/D"
       elseif page.id == "info" and state.modernInfoCanScroll then
-        left = layout.wide and "L/R  U/D NOTES" or "L/R U/D"
+        left = layout.wide and "L/R  U/D NOTES"
+          or tight and "LR UD" or "L/R U/D"
       else
-        left = layout.wide and "LEFT/RIGHT TAB" or "L/R TAB"
+        left = layout.wide and "LEFT/RIGHT TAB"
+          or tight and "LR TAB" or "L/R TAB"
       end
+      local leftWidth = 0
       if #entryPages(state) > 1 then
-        drawText(left, 5, layout.footerY + 2,
-          layout.wide and ((page.id == "family" or page.id == "moves")
-            and 136 or 112) or (state.modernMoveDetail and 72 or 56),
-          WHITE)
+        leftWidth = drawText(left, 5, layout.footerY + 2,
+          Font.width(left), WHITE)
       end
+      local gap = leftWidth > 0 and 6 or 0
+      local rightWidth = math.max(0,
+        layout.width - 10 - leftWidth - gap)
       drawRight(right, layout.width - 5, layout.footerY + 2,
-        layout.wide and 120 or (state.modernMoveDetail and 48 or 80), LIGHT)
+        rightWidth, LIGHT)
     else
       local lines = state.modernInfoLines or {}
       local visible = state.modernInfoVisible or #lines

@@ -26,6 +26,9 @@ later-generation systems that are absent from the active data model.
 
 - Grid icons use the shared party renderer so Unique Menu Icons remains the
   navigation-art authority.
+- Wilds of Kanto icons use its exported follower selector directly, retaining
+  authored idle/walk frames across icon-mod load orders without changing the
+  battle-art path used by large portraits.
 - HGSS icons are fitted by opaque bounds and protected by opaque runs.
 - Large previews resolve `kind = "battle"`, matching combat, Party summary,
   and PC details.

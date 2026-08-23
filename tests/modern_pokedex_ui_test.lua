@@ -490,6 +490,18 @@ for _, size in ipairs(commonSizes) do
 end
 
 graphics.getPixelDimensions = function() return 640, 576 end
+local compactListFooter = {}
+local compactListRealFont = Font.draw
+Font.draw = function(value, x, y)
+  compactListFooter[tostring(value)] = true
+  return compactListRealFont(value, x, y)
+end
+dex:draw()
+Font.draw = compactListRealFont
+T.check(compactListFooter["SEEN 003"]
+    and not compactListFooter["S003 C003"],
+  "compact Pokedex footer names only the seen count")
+
 local originalDexText = responsiveEntry.def.dexEntry.text
 responsiveEntry.def.dexEntry.text = "OBVIOUSLY PREFERS HOT PLACES. WHEN IT "
   .. "RAINS, STEAM SPOUTS FROM THE TIP OF ITS TAIL."
@@ -509,6 +521,13 @@ for _, item in ipairs(compactInfoText) do
 end
 T.eq(noteLines, 4,
   "compact INFO reserves four readable lines for flavour text")
+local sawTightNav, sawCompleteActions = false, false
+for _, item in ipairs(compactInfoText) do
+  if item.value == "LR UD" then sawTightNav = true end
+  if item.value == "A CRY B BACK" then sawCompleteActions = true end
+end
+T.check(sawTightNav and sawCompleteActions,
+  "compact INFO fits complete navigation and action labels in its footer")
 T.check(responsiveEntry.modernInfoCanScroll,
   "compact INFO exposes overflow notes instead of discarding them")
 press(responsiveEntry, "down")
@@ -602,6 +621,9 @@ Font.draw = realCompactFont
 T.check(compactStatsText["TOTAL 253"] and compactStatsText["CATCH 45"]
     and compactStatsText["EXP 64"] and compactStatsText["GROW M.S."],
   "compact STATS preserves total, catch rate, experience, and growth data")
+T.check(compactStatsText.ATK and compactStatsText.SPE
+    and compactStatsText.SPC,
+  "compact STATS uses ATK and distinguishes Speed (SPE) from Special (SPC)")
 
 -- Strip every optional research field from the standalone third species.
 -- Its entry should contract to INFO instead of advertising empty sections.
@@ -641,4 +663,120 @@ T.check(not sawFieldNotes,
 graphics.getPixelDimensions = realDimensions
 run.release()
 PaletteFX.setMode(previousMode)
+
+-- Wilds of Kanto's exported follower selector must survive a later icon mod
+-- replacing PartyMenu.drawIcon. The Pokédex consumes the export directly,
+-- animates only its focused row, and protects only visible sprite pixels.
+do
+local wildsData = T.fixtures.fresh()
+wildsData.icons = { icons = {}, byDex = {}, bySpecies = {} }
+Font.load(wildsData)
+local wildsRun = T.sdk.loadMods({
+  "mods/modern_party_ui/tests/fixtures/wilds_of_kanto",
+  "mods/modern_pokedex_ui",
+}, { data = wildsData, dev = true })
+T.eq(#wildsRun.errors, 0, "loads beside Wilds of Kanto 2.1.7")
+
+local wildsStack = { states = {} }
+function wildsStack:push(state) self.states[#self.states + 1] = state end
+function wildsStack:pop() return table.remove(self.states) end
+function wildsStack:top() return self.states[#self.states] end
+local wildsGame = {
+  data = wildsRun.data,
+  save = { pokedex = {
+    seen = { FIXMON_A = true, FIXMON_B = true, FIXMON_C = true },
+    owned = { FIXMON_A = true, FIXMON_B = true, FIXMON_C = true },
+  } },
+  stack = wildsStack,
+  input = { wasPressed = function() return false end },
+  renderer = { uiSize = function() return 256, 144 end },
+}
+local wildsDex = wildsRun.data.screens.PokedexMenu.new(wildsGame)
+wildsDex.modernDexClock = 5
+wildsStack:push(wildsDex)
+
+local realWildsDraw = graphics.draw
+local realWildsImage = Assets.image
+local realWildsImageData = Assets.imageData
+local realWildsMark = PaletteFX.markTrueColor
+local drawIconBeforeWilds = PartyMenu.drawIcon
+local wildsDraws, wildsMarks = {}, {}
+local fakeWildsData = {}
+function fakeWildsData:getDimensions() return 16, 96 end
+function fakeWildsData:getPixel(px, py)
+  local localY = py % 16
+  local opaque = px >= 4 and px <= 11 and localY >= 3 and localY <= 12
+  return 1, 1, 1, opaque and 1 or 0
+end
+Assets.image = function(path)
+  if tostring(path):find("overworld_wild_spawns", 1, true) then
+    return {
+      path = path,
+      getDimensions = function() return 16, 96 end,
+      getWidth = function() return 16 end,
+      getHeight = function() return 96 end,
+    }
+  end
+  return realWildsImage(path)
+end
+Assets.imageData = function(path)
+  if tostring(path):find("overworld_wild_spawns", 1, true) then
+    return fakeWildsData
+  end
+  return realWildsImageData(path)
+end
+PartyMenu.drawIcon = function() return false end
+graphics.draw = function(image, quad, x, y, rotation, sx, sy, ...)
+  if type(image) == "table"
+      and tostring(image.path):find("overworld_wild_spawns", 1, true) then
+    wildsDraws[#wildsDraws + 1] = {
+      path = image.path, quad = quad, x = x, y = y,
+      sx = sx or 1, sy = sy or sx or 1,
+    }
+  end
+  return realWildsDraw(image, quad, x, y, rotation, sx, sy, ...)
+end
+PaletteFX.markTrueColor = function(x, y, w, h)
+  wildsMarks[#wildsMarks + 1] = { x = x, y = y, w = w, h = h }
+end
+
+local wildsOK, wildsErr = pcall(wildsDex.draw, wildsDex)
+graphics.draw = realWildsDraw
+Assets.image = realWildsImage
+Assets.imageData = realWildsImageData
+PaletteFX.markTrueColor = realWildsMark
+PartyMenu.drawIcon = drawIconBeforeWilds
+T.check(wildsOK,
+  "Wilds artwork draws without its global icon hook: " .. tostring(wildsErr))
+T.eq(#wildsDraws, 3,
+  "every visible Pokédex row consumes Wilds' exported sprite sheet")
+local wildsCalls = wildsRun.loader.exports.overworld_wild_spawns.calls
+T.eq(#wildsCalls, 3,
+  "each Pokédex species is resolved once through Wilds' public API")
+for index, call in ipairs(wildsCalls) do
+  T.eq(call.species, "FIXMON_" .. string.char(64 + index),
+    "Wilds resolver receives Pokédex species " .. index)
+  T.eq(call.role, "party_menu",
+    "Wilds resolver receives the stable menu-art role")
+end
+T.check(wildsDraws[1] and wildsDraws[1].quad.y == 48,
+  "the focused Pokédex row uses Wilds' authored walk frame")
+for index = 2, #wildsDraws do
+  T.check(wildsDraws[index].quad.y == 0,
+    "unfocused Wilds row " .. index .. " uses its idle frame")
+end
+local exactWildsMarks, broadWildsMark = 0, false
+for _, rect in ipairs(wildsMarks) do
+  if rect.x < 30 and rect.y >= 20 and rect.y < 84 then
+    if rect.w < 16 and rect.h <= 1 then
+      exactWildsMarks = exactWildsMarks + 1
+    end
+    if rect.w >= 16 and rect.h >= 16 then broadWildsMark = true end
+  end
+end
+T.check(exactWildsMarks > 0 and not broadWildsMark,
+  "Wilds transparency never restores a square behind a Pokédex icon")
+wildsRun.release()
+end
+
 T.finish("modern_pokedex_ui")

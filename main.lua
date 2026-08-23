@@ -12,10 +12,13 @@ return function(mod)
 
   local crystal251 = mod.find("CRYSTAL_251")
   local usefulMoveInfo = mod.find("useful_move_info")
+  local wildsOfKanto = mod.find("overworld_wild_spawns")
   local compatibility = {
     gen1ModernUi = mod.find("gen1_modern_ui") ~= nil,
     hgssSprites = mod.find("HGSS_SPRITES") ~= nil,
     uniqueMenuIcons = mod.find("unique_menu_icons") ~= nil,
+    wildsOfKanto = wildsOfKanto ~= nil,
+    wildsOfKantoExports = wildsOfKanto and wildsOfKanto.exports or nil,
     crystalMoveScripts = crystal251 and crystal251.exports
       and crystal251.exports.crystalMoveScripts,
     moveEffectText = usefulMoveInfo and usefulMoveInfo.exports
@@ -114,6 +117,7 @@ return function(mod)
   local icons = {}
   if compatibility.hgssSprites then icons[#icons + 1] = "HGSS" end
   if compatibility.uniqueMenuIcons then icons[#icons + 1] = "Unique Icons" end
+  if compatibility.wildsOfKanto then icons[#icons + 1] = "Wilds of Kanto" end
   mod.log:info("modern Pokedex enabled%s",
     #icons > 0 and (" with " .. table.concat(icons, " + ")) or "")
 end
