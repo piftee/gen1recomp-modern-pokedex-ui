@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.2.1] - 2026-08-24
+
+### Added
+
+- The regular Options screen now contains one `MODERN POKEDEX` entry that
+  opens a dedicated page for Widescreen, Backdrop, and Colours. Changes made
+  there share the same live and saved values as the mod manager.
+- `POKEDEX COLOURS` now offers Light and Dark themes. Dark mode uses deep
+  neutral surfaces, high-contrast text, and restrained type-colour accents
+  without changing or dimming Pokémon artwork.
+
+### Fixed
+
+- INFO reserves a dedicated right-hand gutter for scroll indicators, keeping
+  the up arrow clear of weight and the down arrow clear of the final visible
+  notes line at compact and portrait resolutions.
+- Pokédex descriptions that omit terminal punctuation now receive the final
+  full stop supplied by the vanilla entry screen; descriptions and
+  translations that already end in punctuation are left unchanged.
+- Transparent battle sprites now use their authored alpha as the exact
+  background mask. The fallback white-matte flood fill no longer removes
+  legitimate white highlights or body pixels, eliminating the broken bands
+  seen across some compact FAMILY portraits.
+- Fractionally scaled portrait masks are rebuilt on the final integer pixel
+  grid. Their colour protection now follows the same nearest-neighbour pixels
+  as the sprite at portrait/mobile display scales, without restoring a square
+  backing.
+
 ## [0.2.0] - 2026-08-23
 
 ### Added

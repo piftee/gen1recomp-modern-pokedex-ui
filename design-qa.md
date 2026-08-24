@@ -9,6 +9,12 @@ palette ramps, hard black outlines, diagonal pixel texture, and chamfered
 cards. It does not imitate the reference's high-resolution typography or add
 later-generation systems that are absent from the active data model.
 
+Light remains the default. The optional Dark colour setting replaces white
+research surfaces with deep neutral cards, promotes body and secondary copy
+to high-contrast light shades, and retains type colour as a border, selected
+state, or chip accent. Pokémon artwork remains colour-authoritative in both
+themes.
+
 ## Information rules
 
 - INFO is the stable identity page.
@@ -41,7 +47,8 @@ later-generation systems that are absent from the active data model.
 ## Layout checks
 
 - 160×144: purpose-built compact INFO and STATS compositions, browsable move
-  details, fitted search controls, and no off-screen controls.
+  details, fitted search controls, dedicated note-scroll gutters, and no
+  off-screen controls.
 - 192×144 and 224×144: compact compositions expand without label collisions.
 - 240×144 and 256×144: list plus live preview; research profile rail plus main
   data card, with shortened footer hints where the long forms would overlap.
@@ -49,9 +56,15 @@ later-generation systems that are absent from the active data model.
   Left/Right continues through the complete page list.
 - Sparse species: INFO-only layout without empty research panels.
 - Long names and values: clipped through the shared pixel-font fitter.
+- Light and Dark: list, search, actions, every built-in research page, move
+  detail, and compact/wide layouts retain readable surface separation and
+  text contrast.
 
 ## Behaviour checks
 
+- The regular Options screen exposes one `MODERN POKEDEX` row; activating
+  it opens a three-row nested page whose values stay synchronized with the
+  mod manager rather than adding loose settings to the main menu.
 - DATA opens tabbed research only from the modern Pokédex list.
 - Select opens letter/type search; both fields combine, ALL clears them, and
   the filtered native action items remain aligned with the visible cards.

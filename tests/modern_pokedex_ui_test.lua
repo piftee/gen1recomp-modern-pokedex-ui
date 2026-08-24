@@ -8,6 +8,7 @@ local PaletteFX = require("src.render.PaletteFX")
 local PartyMenu = require("src.ui.PartyMenu")
 local Sprites = require("src.pokemon.Sprites")
 local Strings = require("src.core.Strings")
+local Runtime = require("src.mods.Runtime")
 
 local data = T.fixtures.fresh()
 data.icons = { icons = {}, byDex = {}, bySpecies = {} }
@@ -61,6 +62,55 @@ local run = T.sdk.loadMods({
 }, { data = data, dev = true })
 T.eq(#run.errors, 0, "loads clean (" .. tostring(run.errors[1]) .. ")")
 Strings.load(run.data)
+
+local schema = run.loader.optionSchemas.modern_pokedex_ui or {}
+T.eq(#schema, 3, "registers widescreen, backdrop, and colour settings")
+T.eq(schema[3].key, "theme", "the colour setting has a stable saved key")
+T.eq(schema[3].default, "light", "existing installs retain the light theme")
+T.eq(schema[3].choices[2][2], "dark",
+  "the Pokedex colour setting offers an explicit dark theme")
+
+do
+  local optionGame = {
+    data = run.data,
+    save = { options = {} },
+    mods = run.loader,
+    stack = { push = function(self, page) self.page = page end },
+  }
+  local mainRows = Runtime.call("ui.options.rows",
+    function(_, rows) return rows end,
+    optionGame, { { id = "text_speed" } })
+  T.eq(#mainRows, 2,
+    "one Modern Pokedex UI entry is added to the regular Options menu")
+  T.eq(mainRows[2].id, "modern_pokedex_ui",
+    "the consolidated Pokedex settings entry follows the game's own rows")
+  T.eq(mainRows[2].label, "MODERN POKEDEX",
+    "the consolidated entry identifies the mod without crossing its frame")
+  T.check(Font.width(mainRows[2].label) <= 128,
+    "the consolidated entry fits the regular Options box")
+  T.eq(mainRows[2].value(optionGame), "OPEN",
+    "the consolidated Pokedex entry clearly opens a nested page")
+  mainRows[2].activate(optionGame)
+  local nested = optionGame.stack.page and optionGame.stack.page.rows or {}
+  T.eq(#nested, 3,
+    "the nested Modern Pokedex UI page contains every presentation setting")
+  T.eq(nested[1].id, "modern_pokedex_ui_responsive",
+    "the nested page starts with the widescreen setting")
+  T.eq(nested[1].value(optionGame), "ON",
+    "the nested page reads the widescreen default from the mod options")
+  T.eq(nested[2].value(optionGame), "GRID",
+    "the nested page exposes the backdrop choice")
+  T.eq(nested[3].id, "modern_pokedex_ui_theme",
+    "the nested page exposes the colour setting")
+  T.eq(nested[3].value(optionGame), "LIGHT",
+    "the nested page reports the default light theme")
+  nested[3].step(optionGame, 1)
+  T.eq(run.loader.modOptions.modern_pokedex_ui.theme, "dark",
+    "the nested page switches the live Pokedex theme to dark")
+  T.eq(optionGame.save.options.modOptions.modern_pokedex_ui.theme, "dark",
+    "the nested page persists the selected Pokedex theme")
+  run.loader.modOptions.modern_pokedex_ui = nil
+end
 
 local dexRecord = run.data.screens and run.data.screens.PokedexMenu
 local entryRecord = run.data.screens and run.data.screens.DexEntryMenu
@@ -340,6 +390,47 @@ end
 T.check(battleArt,
   "Pokedex profiles resolve through the exact battle-front sprite context")
 
+-- Alpha-backed battle art already has an exact background. White pixels
+-- touching that transparency are still artwork (highlights, eyes, petals),
+-- and must not be consumed by the fallback flood fill for opaque mattes.
+local alphaPixels = {}
+for y = 0, 7 do
+  alphaPixels[y] = {}
+  for x = 0, 7 do alphaPixels[y][x] = { 0, 0, 0, 0 } end
+end
+alphaPixels[1][1] = { 1, 1, 1, 1 }
+alphaPixels[1][2] = { 0.5, 0.5, 0.5, 1 }
+local alphaPortrait = { path = "alpha_portrait.png" }
+function alphaPortrait:getDimensions() return 8, 8 end
+function alphaPortrait:getPixel(x, y)
+  return unpack(alphaPixels[y][x])
+end
+function alphaPortrait:mapPixel(fn)
+  for y = 0, 7 do
+    for x = 0, 7 do
+      alphaPixels[y][x] = { fn(x, y, self:getPixel(x, y)) }
+    end
+  end
+end
+local alphaPath, alphaImageData = Sprites.path, Assets.imageData
+Sprites.path = function(data_, species, side, opts)
+  if species == "FIXMON_C" and side == "front" then
+    return "alpha_portrait.png", false
+  end
+  return alphaPath(data_, species, side, opts)
+end
+Assets.imageData = function(path, ...)
+  if path == "alpha_portrait.png" then return alphaPortrait end
+  return alphaImageData(path, ...)
+end
+local alphaEntry = entryRecord.new(game, "FIXMON_C")
+local alphaOK, alphaErr = pcall(alphaEntry.draw, alphaEntry)
+Sprites.path, Assets.imageData = alphaPath, alphaImageData
+T.check(alphaOK,
+  "an alpha-backed portrait draws headlessly: " .. tostring(alphaErr))
+T.eq(alphaPixels[1][1][4], 1,
+  "transparent portraits retain white artwork touching their silhouette")
+
 press(entry, "right")
 T.eq(entry.modernDexPages[entry.modernDexPage].id, "stats",
   "RIGHT visits the next available page")
@@ -526,7 +617,9 @@ T.eq(familyEntry.modernDexPages[familyEntry.modernDexPage].id, "family",
 press(familyEntry, "down")
 local realFamilyIcon = PartyMenu.drawIcon
 local realFamilyPath = Sprites.path
+local realFamilyMark = PaletteFX.markTrueColor
 local familyIconCalls, familyBattleSpecies = 0, {}
+local familySpriteMarks = {}
 PartyMenu.drawIcon = function(game_, mon, x, y, selected, ...)
   familyIconCalls = familyIconCalls + 1
   return realFamilyIcon(game_, mon, x, y, selected, ...)
@@ -537,15 +630,29 @@ Sprites.path = function(data_, species, side, opts)
   end
   return realFamilyPath(data_, species, side, opts)
 end
+PaletteFX.markTrueColor = function(x, y, w, h)
+  familySpriteMarks[#familySpriteMarks + 1] = {
+    x = x, y = y, w = w, h = h,
+  }
+end
 local familyDrawOK, familyDrawErr = pcall(familyEntry.draw, familyEntry)
 PartyMenu.drawIcon = realFamilyIcon
 Sprites.path = realFamilyPath
+PaletteFX.markTrueColor = realFamilyMark
 T.check(familyDrawOK,
   "the focused family card draws headlessly: " .. tostring(familyDrawErr))
 T.eq(familyIconCalls, 0,
   "FAMILY cards do not use Unique Icons/HGSS menu-icon artwork")
 T.check(familyBattleSpecies.FIXMON_A and familyBattleSpecies.FIXMON_B,
   "known FAMILY cards resolve full battle-front sprites for every member")
+local pixelAlignedFamilyMarks = #familySpriteMarks > 0
+for _, rect in ipairs(familySpriteMarks) do
+  pixelAlignedFamilyMarks = pixelAlignedFamilyMarks
+    and rect.x == math.floor(rect.x) and rect.y == math.floor(rect.y)
+    and rect.w == math.floor(rect.w) and rect.h == 1
+end
+T.check(pixelAlignedFamilyMarks,
+  "scaled FAMILY portraits protect complete destination-pixel rows")
 local stackDepth = #stack.states
 press(familyEntry, "a")
 T.eq(#stack.states, stackDepth,
@@ -616,14 +723,28 @@ responsiveEntry.def.dexEntry.text = "OBVIOUSLY PREFERS HOT PLACES. WHEN IT "
   .. "RAINS, STEAM SPOUTS FROM THE TIP OF ITS TAIL."
 responsiveEntry.modernDexPage = 1
 local compactInfoText = {}
+local compactInfoTriangles = {}
 local realCompactFont = Font.draw
+local realCompactPolygon = graphics.polygon
 Font.draw = function(value, x, y)
-  compactInfoText[#compactInfoText + 1] = { value = tostring(value), y = y }
+  compactInfoText[#compactInfoText + 1] = {
+    value = tostring(value), x = x, y = y,
+  }
   return realCompactFont(value, x, y)
+end
+graphics.polygon = function(mode, points, ...)
+  if mode == "fill" and type(points) == "table" and #points == 6 then
+    local copy = {}
+    for index, value in ipairs(points) do copy[index] = value end
+    compactInfoTriangles[#compactInfoTriangles + 1] = copy
+  end
+  if realCompactPolygon then
+    return realCompactPolygon(mode, points, ...)
+  end
 end
 responsiveEntry:draw()
 Font.draw = realCompactFont
-responsiveEntry.def.dexEntry.text = originalDexText
+graphics.polygon = realCompactPolygon
 local noteLines = 0
 for _, item in ipairs(compactInfoText) do
   if item.y >= 92 and item.y <= 122 then noteLines = noteLines + 1 end
@@ -639,12 +760,102 @@ T.check(sawTightNav and sawCompleteActions,
   "compact INFO fits complete navigation and action labels in its footer")
 T.check(responsiveEntry.modernInfoCanScroll,
   "compact INFO exposes overflow notes instead of discarding them")
+local downArrowLeft
+for _, points in ipairs(compactInfoTriangles) do
+  local minX = math.min(points[1], points[3], points[5])
+  local maxY = math.max(points[2], points[4], points[6])
+  if minX > 130 and maxY > 120 then downArrowLeft = minX break end
+end
+T.check(downArrowLeft ~= nil,
+  "overflowing compact notes draw their down indicator")
+if downArrowLeft then
+  for _, item in ipairs(compactInfoText) do
+    if item.y >= 92 and item.y <= 122 then
+      T.check(item.x + Font.width(item.value) <= downArrowLeft - 4,
+        "the notes gutter keeps the down arrow clear of the final line")
+    end
+  end
+end
 press(responsiveEntry, "down")
 T.eq(responsiveEntry.modernInfoScroll, 1,
   "DOWN reveals the next line of compact field notes")
+
+local scrolledInfoText, scrolledTriangles = {}, {}
+Font.draw = function(value, x, y)
+  scrolledInfoText[#scrolledInfoText + 1] = {
+    value = tostring(value), x = x, y = y,
+  }
+  return realCompactFont(value, x, y)
+end
+graphics.polygon = function(mode, points, ...)
+  if mode == "fill" and type(points) == "table" and #points == 6 then
+    local copy = {}
+    for index, value in ipairs(points) do copy[index] = value end
+    scrolledTriangles[#scrolledTriangles + 1] = copy
+  end
+  if realCompactPolygon then
+    return realCompactPolygon(mode, points, ...)
+  end
+end
+responsiveEntry:draw()
+Font.draw = realCompactFont
+graphics.polygon = realCompactPolygon
+local upArrowLeft
+for _, points in ipairs(scrolledTriangles) do
+  local minX = math.min(points[1], points[3], points[5])
+  local minY = math.min(points[2], points[4], points[6])
+  if minX > 130 and minY < 90 then upArrowLeft = minX break end
+end
+T.check(upArrowLeft ~= nil,
+  "scrolled compact notes draw their up indicator")
+if upArrowLeft then
+  for _, item in ipairs(scrolledInfoText) do
+    if item.value:match("lb$") or item.value:match("kg$") then
+      T.check(item.x + Font.width(item.value) <= upArrowLeft - 4,
+        "the measurement gutter keeps the up arrow clear of weight")
+    end
+  end
+end
 press(responsiveEntry, "up")
 T.eq(responsiveEntry.modernInfoScroll, 0,
   "UP returns to the previous compact field-note line")
+
+local punctuationSource = originalDexText
+responsiveEntry.def.dexEntry.text = "A FIELD NOTE WITHOUT FINAL PUNCTUATION"
+responsiveEntry:draw()
+T.check(table.concat(responsiveEntry.modernInfoLines or {}, " "):match("%.$"),
+  "field notes inherit the vanilla final full stop when data omits it")
+responsiveEntry.def.dexEntry.text = "A FIELD NOTE ALREADY ENDING!"
+responsiveEntry:draw()
+local punctuated = table.concat(responsiveEntry.modernInfoLines or {}, " ")
+T.check(punctuated:match("!$") and not punctuated:match("!%.$"),
+  "existing terminal punctuation is never doubled")
+responsiveEntry.def.dexEntry.text = punctuationSource
+
+run.loader.modOptions.modern_pokedex_ui = { theme = "dark" }
+local darkBackdrop, darkNameInk
+local realDarkRectangle = graphics.rectangle
+graphics.rectangle = function(mode, x, y, w, h, ...)
+  if not darkBackdrop and mode == "fill" and x == 0 and y == 0
+      and w == 160 and h == 144 then
+    darkBackdrop = { graphics.getColor() }
+  end
+  return realDarkRectangle(mode, x, y, w, h, ...)
+end
+Font.draw = function(value, x, y)
+  if tostring(value) == "ALPHAMON" and not darkNameInk then
+    darkNameInk = { graphics.getColor() }
+  end
+  return realCompactFont(value, x, y)
+end
+responsiveEntry:draw()
+Font.draw = realCompactFont
+graphics.rectangle = realDarkRectangle
+T.check(darkBackdrop and darkBackdrop[1] == 0,
+  "the dark colour setting paints a black research backdrop")
+T.check(darkNameInk and darkNameInk[1] == 1,
+  "the dark colour setting promotes body copy to high-contrast white")
+run.loader.modOptions.modern_pokedex_ui = nil
 
 -- Catch/script entry pages are not tabbed. A advances their overflowing
 -- notes before it closes the page, matching the original page-continue flow.

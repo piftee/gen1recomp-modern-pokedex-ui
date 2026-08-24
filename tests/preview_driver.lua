@@ -4,8 +4,10 @@
 --   POKEPORT_IDENTITY=modern-pokedex-preview POKEPORT_VERSION=red love .
 return function(game)
   local U = dofile("tests/drivers/util.lua")
+  local OptionsMenu = require("src.ui.OptionsMenu")
   local PaletteFX = require("src.render.PaletteFX")
   local Screens = require("src.ui.Screens")
+  local Sprites = require("src.pokemon.Sprites")
   local Strings = require("src.core.Strings")
   local DIR = os.getenv("SHOT_DIR") or "/tmp/modern-pokedex-ui"
 
@@ -14,6 +16,18 @@ return function(game)
   })
   game.save.options = game.save.options or {}
   game.save.options.colors = "redpp"
+  local function setTheme(value)
+    game.save.options.modOptions = game.save.options.modOptions or {}
+    game.save.options.modOptions.modern_pokedex_ui =
+      game.save.options.modOptions.modern_pokedex_ui or {}
+    game.save.options.modOptions.modern_pokedex_ui.theme = value
+    if game.mods then
+      game.mods.modOptions = game.mods.modOptions or {}
+      game.mods.modOptions.modern_pokedex_ui =
+        game.mods.modOptions.modern_pokedex_ui or {}
+      game.mods.modOptions.modern_pokedex_ui.theme = value
+    end
+  end
   PaletteFX.setMode("redpp")
   game.save.pokedex = { seen = {}, owned = {} }
   for id in pairs(game.data.pokemon or {}) do
@@ -21,6 +35,21 @@ return function(game)
     game.save.pokedex.owned[id] = true
   end
 
+  while game.stack:top() do game.stack:pop() end
+  local options = OptionsMenu.new(game)
+  game.stack:push(options)
+  for index, row in ipairs(options.rows or {}) do
+    if row.id == "modern_pokedex_ui" then
+      options.index = index
+      options.scroll = math.max(0, index - 4)
+      U.wait(5)
+      U.shot(game, DIR .. "/modern_pokedex_options_entry.png")
+      row.activate(game)
+      U.wait(5)
+      U.shot(game, DIR .. "/modern_pokedex_options_page.png")
+      break
+    end
+  end
   while game.stack:top() do game.stack:pop() end
   local dex = Screens.push(game, "PokedexMenu")
   for index, row in ipairs(dex.modernDexEntries or {}) do
@@ -163,4 +192,65 @@ return function(game)
     U.wait(5)
     U.shot(game, DIR .. "/modern_pokedex_moves_tutor.png")
   end
+
+  if game.data.pokemon.ODDISH then
+    love.window.setMode(640, 576, {
+      resizable = true, minwidth = 640, minheight = 576,
+    })
+    -- When a Crystal 251 cache is present, exercise its alpha-backed battle
+    -- portraits even if this isolated preview profile has that overhaul off.
+    -- These expose white silhouette pixels that an opaque-matte flood fill
+    -- must never erase.
+    local mountedCrystal = false
+    if not love.filesystem.getInfo("crystal_251/generated/front")
+        and love.filesystem.mount then
+      mountedCrystal = love.filesystem.mount(
+        "red/crystal_251", "crystal_251", false) and true or false
+    end
+    local crystalFront = {}
+    for _, id in ipairs({ "ODDISH", "GLOOM", "VILEPLUME" }) do
+      local path = "crystal_251/generated/front/" .. id:lower() .. ".png"
+      if love.filesystem.getInfo(path) then crystalFront[id] = path end
+    end
+    local originalSpritePath = Sprites.path
+    if next(crystalFront) then
+      Sprites.path = function(data, species, side, opts)
+        if side == "front" and crystalFront[species] then
+          return crystalFront[species], false
+        end
+        return originalSpritePath(data, species, side, opts)
+      end
+    end
+    local oddishEntry = Screens.push(game, "DexEntryMenu", "ODDISH")
+    for index, page in ipairs(oddishEntry.modernDexPages or {}) do
+      if page.id == "family" then oddishEntry.modernDexPage = index break end
+    end
+    U.wait(6)
+    U.shot(game, DIR .. "/modern_pokedex_compact_oddish_family.png")
+    love.window.setMode(1080, 1920, { resizable = true })
+    U.wait(6)
+    U.shot(game, DIR .. "/modern_pokedex_portrait_oddish_family.png")
+    Sprites.path = originalSpritePath
+    if mountedCrystal and love.filesystem.unmount then
+      love.filesystem.unmount("red/crystal_251")
+    end
+  end
+
+  -- Exercise the optional colour setting on both the icon index and the
+  -- information-heavy research file. These captures protect dark surface
+  -- contrast without making it the default for existing players.
+  while game.stack:top() do game.stack:pop() end
+  setTheme("dark")
+  love.window.setMode(1280, 720, {
+    resizable = true, minwidth = 640, minheight = 576,
+  })
+  Screens.push(game, "PokedexMenu")
+  U.wait(8)
+  U.shot(game, DIR .. "/modern_pokedex_dark_list.png")
+  game.stack:pop()
+  local darkEntry = Screens.push(game, "DexEntryMenu", species)
+  darkEntry.modernDexPage = 1
+  U.wait(8)
+  U.shot(game, DIR .. "/modern_pokedex_dark_info.png")
+  setTheme("light")
 end

@@ -76,6 +76,16 @@ chips take their three-glyph abbreviation from those translated full names;
 the mod never asks a translation catalog to translate ambiguous English
 abbreviations such as `PSN` or `FLY`.
 
+## Appearance options
+
+Open `MODERN POKEDEX` in the game's regular Options screen to reach its
+dedicated Widescreen, Backdrop, and Colours settings. These are synchronized
+with the same settings in the mod manager. `COLOURS` switches between the
+default Light presentation and a Dark presentation with black research
+surfaces, bright text, and type-coloured card accents. Both modes retain the
+same modern-retro framing and preserve the authored colours of full-colour
+Pokémon icons and battle sprites.
+
 ## Controls
 
 ### Pokédex index

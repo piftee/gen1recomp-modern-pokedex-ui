@@ -65,6 +65,7 @@ return function(mod, compatibility)
   local wildsIconAlphaMasks = {}
   local spriteCache = {}
   local spriteRunCache = {}
+  local scaledSpriteRunCache = setmetatable({}, { __mode = "k" })
   local inkShader
 
   if Assets.register then
@@ -75,6 +76,7 @@ return function(mod, compatibility)
       wildsIconAlphaMasks = {}
       spriteCache = {}
       spriteRunCache = {}
+      scaledSpriteRunCache = setmetatable({}, { __mode = "k" })
     end)
   end
 
@@ -86,6 +88,22 @@ return function(mod, compatibility)
     local ok, value = pcall(mod.options.get, mod.options, key)
     if not ok or value == nil then return fallback end
     return value
+  end
+
+  local function darkTheme()
+    return setting("theme", "light") == "dark"
+  end
+
+  -- Text colours are semantic rather than literal. In the light skin, BLACK
+  -- is body copy and DARK is secondary copy; the dark skin promotes those
+  -- roles to WHITE and LIGHT while leaving deliberate white-on-accent labels
+  -- unchanged.
+  local function textShade(shade)
+    shade = shade == nil and WHITE or shade
+    if not darkTheme() then return shade end
+    if shade == BLACK then return WHITE end
+    if shade == DARK then return LIGHT end
+    return shade
   end
 
   local function shaderForInk()
@@ -120,11 +138,12 @@ return function(mod, compatibility)
     text = fitText(text, maxWidth or Font.width(text))
     love.graphics.push("all")
     local shader = shaderForInk()
+    local ink = textShade(shade)
     if shader then
       love.graphics.setShader(shader)
-      gray(shade == nil and WHITE or shade)
+      gray(ink)
     else
-      gray(BLACK)
+      gray(ink)
     end
     Font.draw(text, math.floor(x), math.floor(y))
     love.graphics.pop()
@@ -172,6 +191,18 @@ return function(mod, compatibility)
   local function panel(x, y, w, h, selected)
     gray(BLACK)
     chamfer("fill", x + 2, y + 2, w - 2, h - 2, 3)
+    if darkTheme() then
+      gray(selected and WHITE or DARK)
+      chamfer("fill", x, y, w - 2, h - 2, 3)
+      gray(selected and DARK or BLACK)
+      chamfer("fill", x + 2, y + 2, w - 6, h - 6, 2)
+      if selected then
+        gray(LIGHT)
+        love.graphics.rectangle("fill", x + 2, y + 6, 2,
+          math.max(1, h - 12))
+      end
+      return
+    end
     gray(selected and BLACK or WHITE)
     chamfer("fill", x, y, w - 2, h - 2, 3)
     gray(selected and LIGHT or WHITE)
@@ -180,6 +211,19 @@ return function(mod, compatibility)
       gray(DARK)
       love.graphics.rectangle("fill", x + 2, y + 6, 2,
         math.max(1, h - 12))
+    end
+  end
+
+  local function insetSurface(x, y, w, h, cut, lightShade)
+    if darkTheme() then
+      gray(DARK)
+      chamfer("fill", x, y, w, h, cut)
+      gray(BLACK)
+      chamfer("fill", x + 2, y + 2, math.max(1, w - 4),
+        math.max(1, h - 4), math.max(0, (cut or 0) - 1))
+    else
+      gray(lightShade or WHITE)
+      chamfer("fill", x, y, w, h, cut)
     end
   end
 
@@ -240,10 +284,10 @@ return function(mod, compatibility)
   end
 
   local function backdrop(layout)
-    gray(WHITE)
+    gray(darkTheme() and BLACK or WHITE)
     love.graphics.rectangle("fill", 0, 0, layout.width, layout.height)
     if setting("pattern", "grid") ~= "grid" then return end
-    gray(LIGHT)
+    gray(darkTheme() and DARK or LIGHT)
     for x = -SCREEN_H, layout.width, 16 do
       love.graphics.line(x, HEADER_H, x + SCREEN_H, layout.footerY)
       love.graphics.line(x + SCREEN_H, HEADER_H, x, layout.footerY)
@@ -638,6 +682,64 @@ return function(mod, compatibility)
     return runs
   end
 
+  -- True-colour protection is applied after the palette pass by redrawing
+  -- only the portrait's opaque pixels. A source-space run cannot simply be
+  -- multiplied by a fractional scale: its fractional scissor edges do not
+  -- necessarily cover the same destination pixels selected by nearest
+  -- filtering, which leaves alternating rows to inherit the card palette.
+  -- Re-sample the alpha runs onto the final integer pixel grid instead.
+  local function scaledVisibleRuns(runs, width, height, scale)
+    if not runs or #runs == 0 then return {} end
+    local byScale = scaledSpriteRunCache[runs]
+    if not byScale then
+      byScale = {}
+      scaledSpriteRunCache[runs] = byScale
+    end
+    local key = table.concat({ width, height, tostring(scale) }, ":")
+    if byScale[key] then return byScale[key] end
+
+    local sourceRows = {}
+    for _, run in ipairs(runs) do
+      local row = sourceRows[run.y]
+      if not row then row = {}; sourceRows[run.y] = row end
+      row[#row + 1] = { run.x, run.x + run.w }
+    end
+
+    -- Pixel centres determine the nearest source texel. Rounding the drawn
+    -- extent the same way gives a mask that is pixel-for-pixel with LÖVE's
+    -- nearest-neighbour result, including compact family cards.
+    local drawW = math.max(1, math.floor(width * scale + 0.5))
+    local drawH = math.max(1, math.floor(height * scale + 0.5))
+    local result = {}
+    for y = 0, drawH - 1 do
+      local sourceY = math.min(height - 1,
+        math.floor((y + 0.5) / scale))
+      local row = sourceRows[sourceY]
+      local start
+      for x = 0, drawW do
+        local visible = false
+        if x < drawW and row then
+          local sourceX = math.min(width - 1,
+            math.floor((x + 0.5) / scale))
+          for _, interval in ipairs(row) do
+            if sourceX >= interval[1] and sourceX < interval[2] then
+              visible = true
+              break
+            end
+          end
+        end
+        if visible and start == nil then
+          start = x
+        elseif not visible and start ~= nil then
+          result[#result + 1] = { x = start, y = y, w = x - start }
+          start = nil
+        end
+      end
+    end
+    byScale[key] = result
+    return result
+  end
+
   local function preparedSprite(path, key, colors)
     local cached = spriteCache[key]
     if cached ~= nil then return cached or nil, spriteRunCache[key] end
@@ -647,11 +749,28 @@ return function(mod, compatibility)
       local okData, data = pcall(Assets.imageData, path)
       if okData and data and type(data.mapPixel) == "function" then
         local width, height = data:getDimensions()
+        local hasTransparency = false
+        for y = 0, height - 1 do
+          for x = 0, width - 1 do
+            local _, _, _, alpha = data:getPixel(x, y)
+            if (alpha or 1) <= 0 then
+              hasTransparency = true
+              break
+            end
+          end
+          if hasTransparency then break end
+        end
         local outside, queueX, queueY, head = {}, {}, {}, 1
         local function pixelIndex(x, y) return y * width + x + 1 end
         local function matte(x, y)
           local r, g, b, a = data:getPixel(x, y)
-          return a <= 0 or (r > 0.83 and g > 0.83 and b > 0.83)
+          -- Transparent sprite sheets already identify their background
+          -- exactly. Treating adjacent white artwork as a second matte lets
+          -- the flood fill walk into highlights and body pixels, carving
+          -- horizontal gaps through scaled Crystal/HGSS portraits. Only
+          -- infer a near-white matte when the source has no alpha at all.
+          return a <= 0 or (not hasTransparency
+            and r > 0.83 and g > 0.83 and b > 0.83)
         end
         local function visit(x, y)
           if x < 0 or y < 0 or x >= width or y >= height then return end
@@ -761,10 +880,9 @@ return function(mod, compatibility)
     love.graphics.draw(image, x, y, 0, scale, scale)
     love.graphics.pop()
     if protected then
-      for _, run in ipairs(runs or {}) do
+      for _, run in ipairs(scaledVisibleRuns(runs, sw, sh, scale)) do
         regions[#regions + 1] = {
-          x = x + run.x * scale, y = y + run.y * scale,
-          w = math.max(1, run.w * scale), h = math.max(1, scale),
+          x = x + run.x, y = y + run.y, w = run.w, h = 1,
         }
       end
     end
@@ -783,9 +901,11 @@ return function(mod, compatibility)
   end
 
   local function drawBall(x, y, caught)
-    gray(caught and BLACK or DARK)
+    gray(caught and (darkTheme() and WHITE or BLACK)
+      or (darkTheme() and LIGHT or DARK))
     love.graphics.circle("fill", x, y, 3.5)
-    gray(caught and WHITE or LIGHT)
+    gray(caught and (darkTheme() and BLACK or WHITE)
+      or (darkTheme() and DARK or LIGHT))
     love.graphics.rectangle("fill", x - 3.5, y - 0.5, 7, 1)
     love.graphics.circle("fill", x, y, 1.2)
   end
@@ -964,8 +1084,7 @@ return function(mod, compatibility)
     local rect = searchGeometry(layout)
     gray(BLACK)
     chamfer("fill", rect.x + 2, rect.y + 2, rect.w, rect.h, 4)
-    gray(WHITE)
-    chamfer("fill", rect.x, rect.y, rect.w, rect.h, 4)
+    insetSurface(rect.x, rect.y, rect.w, rect.h, 4, WHITE)
     drawCentered("SEARCH", rect.x + 5, rect.y + 5, rect.w - 10, DARK)
     for field, label in ipairs({ "LETTER", "TYPE" }) do
       local y = rect.y + 18 + (field - 1) * 15
@@ -1141,8 +1260,7 @@ return function(mod, compatibility)
     local rect = actionGeometry(menu, owner, layout)
     gray(BLACK)
     chamfer("fill", rect.x + 2, rect.y + 2, rect.w, rect.h, 4)
-    gray(WHITE)
-    chamfer("fill", rect.x, rect.y, rect.w, rect.h, 4)
+    insetSurface(rect.x, rect.y, rect.w, rect.h, 4, WHITE)
     drawCentered("ACTIONS", rect.x + 4, rect.y + 4,
       rect.w - 8, DARK)
     for index, item in ipairs(menu.items) do
@@ -1403,7 +1521,16 @@ return function(mod, compatibility)
     local key = state.def.dexEntry and state.def.dexEntry.text
     if not key then return nil end
     local text = state.game.data.text and state.game.data.text[key]
-    return Strings(text or key)
+    text = tostring(Strings(text or key) or "")
+    local body, trailing = text:match("^(.-)(%s*)$")
+    if body == "" then return text end
+    -- The ROM stores Pokédex prose without its final full stop; the vanilla
+    -- entry renderer supplies it. Keep that convention without doubling
+    -- punctuation already supplied by a translation or companion mod.
+    local terminated = body:match("[%.%!%?]$")
+      or body:match("…$") or body:match("。$")
+      or body:match("！$") or body:match("？$")
+    return body .. (terminated and "" or ".") .. trailing
   end
 
   local function drawTypeChip(label, x, y, width)
@@ -1540,7 +1667,13 @@ return function(mod, compatibility)
     panel(layout.description.x, layout.description.y,
       layout.description.w, layout.description.h, false)
     local descX = layout.description.x + 6
-    local descW = layout.description.w - 12
+    -- Scroll indicators own the rightmost gutter. Both notes and right-
+    -- aligned measurements stop before it, so the up arrow never touches
+    -- weight and the down arrow never sits over the final visible line.
+    local arrowGutter = 12
+    local descW = math.max(32, layout.description.w - 12 - arrowGutter)
+    local descRight = layout.description.x + layout.description.w
+      - 6 - arrowGutter
     local measurements = {}
     if owned then
       if e.heightM then
@@ -1563,7 +1696,7 @@ return function(mod, compatibility)
       if #measurements > 0 then
         measurements = table.concat(measurements, "  ")
         drawRight(measurements,
-          layout.description.x + layout.description.w - 6,
+          descRight,
           layout.description.y + 4, descW, DARK)
       end
     end
@@ -1595,7 +1728,7 @@ return function(mod, compatibility)
       y = y + 10
     end
     if state.modernInfoScroll > 0 then
-      gray(DARK)
+      gray(darkTheme() and LIGHT or DARK)
       if love.graphics.polygon then
         love.graphics.polygon("fill", {
           layout.description.x + layout.description.w - 11,
@@ -1612,7 +1745,7 @@ return function(mod, compatibility)
       end
     end
     if state.modernInfoScroll < maxScroll then
-      gray(DARK)
+      gray(darkTheme() and LIGHT or DARK)
       if love.graphics.polygon then
         love.graphics.polygon("fill", {
           layout.description.x + layout.description.w - 11,
@@ -1747,7 +1880,7 @@ return function(mod, compatibility)
       local value = stats[row[2]]
       drawText(layout.wide and row[1] or row[4],
         main.x + 6, y + 1, labelW - 2, BLACK)
-      gray(BLACK)
+      gray(darkTheme() and DARK or BLACK)
       love.graphics.rectangle("fill", barX, y + 2, barW,
         layout.wide and 7 or 5)
       gray(WHITE)
@@ -2231,7 +2364,7 @@ return function(mod, compatibility)
       if not row then break end
       local move = row.move or { name = row.id }
       local selected = index == state.modernMoveCursor
-      gray(selected and DARK or LIGHT)
+      gray(selected and DARK or (darkTheme() and BLACK or LIGHT))
       chamfer("fill", layout.content.x + 5, y,
         layout.content.w - 10, 12, 2)
       if selected then
@@ -2265,8 +2398,7 @@ return function(mod, compatibility)
     local move = row.move or { name = row.id }
     local x, y, w = layout.content.x + 5,
       layout.content.y + 5, layout.content.w - 10
-    gray(LIGHT)
-    chamfer("fill", x, y, w, 28, 3)
+    insetSurface(x, y, w, 28, 3, LIGHT)
     drawText(move.name or row.id, x + 6, y + 4,
       w - (layout.wide and 86 or 54), BLACK)
     local source = row.kind == "level"
@@ -2306,8 +2438,7 @@ return function(mod, compatibility)
       local x1 = x + math.floor(column * w / columns)
       local x2 = x + math.floor((column + 1) * w / columns)
       local cellY = factY + factRow * cellH
-      gray(WHITE)
-      chamfer("fill", x1 + 1, cellY, x2 - x1 - 3, cellH - 3, 2)
+      insetSurface(x1 + 1, cellY, x2 - x1 - 3, cellH - 3, 2, WHITE)
       local shortLabels = (not layout.wide or columns >= 5) and {
         CLASS = "CAT", PRIORITY = "PRI",
       } or nil
@@ -2320,8 +2451,7 @@ return function(mod, compatibility)
     local detailY = factY + factRows * cellH + 1
     local detailH = layout.content.y + layout.content.h - detailY - 4
     if detail and detailH >= 16 then
-      gray(WHITE)
-      chamfer("fill", x + 1, detailY, w - 2, detailH, 2)
+      insetSurface(x + 1, detailY, w - 2, detailH, 2, WHITE)
       drawText("EFFECT", x + 6, detailY + 3, 48, DARK)
       local lines = wrappedLines(detail, w - 12,
         math.max(1, math.floor((detailH - 12) / 9)))
@@ -2459,7 +2589,7 @@ return function(mod, compatibility)
     for index = 1, math.min(maxRows, #rows) do
       local row = rows[index]
       if index % 2 == 0 then
-        gray(LIGHT)
+        gray(darkTheme() and DARK or LIGHT)
         chamfer("fill", layout.content.x + 5, y - 2,
           layout.content.w - 10, 13, 2)
       end

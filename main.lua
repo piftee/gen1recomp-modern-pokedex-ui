@@ -1,14 +1,111 @@
 -- Modern Pokedex UI keeps the native discovery data and action behavior, then
 -- replaces the dex list, its action overlay, and the species data page.
 return function(mod)
-  mod.options:define({
+  local optionSchema = {
     { key = "responsive", label = "POKEDEX WIDESCREEN", type = "toggle",
       default = true },
     { key = "pattern", label = "POKEDEX BACKDROP", type = "choice",
       default = "grid", choices = {
         { "GRID", "grid" }, { "PLAIN", "plain" },
       } },
-  })
+    { key = "theme", label = "POKEDEX COLOURS", type = "choice",
+      default = "light", choices = {
+        { "LIGHT", "light" }, { "DARK", "dark" },
+      } },
+  }
+  mod.options:define(optionSchema)
+
+  local nestedLabels = {
+    responsive = "WIDESCREEN",
+    pattern = "BACKDROP",
+    theme = "COLOURS",
+  }
+
+  local function setOption(game, key, value)
+    local options = game and game.save and game.save.options
+    if options then
+      options.modOptions = options.modOptions or {}
+      options.modOptions[mod.id] = options.modOptions[mod.id] or {}
+      options.modOptions[mod.id][key] = value
+    end
+    local loader = game and game.mods
+    if loader then
+      loader.modOptions = loader.modOptions or {}
+      loader.modOptions[mod.id] = loader.modOptions[mod.id] or {}
+      loader.modOptions[mod.id][key] = value
+      if loader.events then
+        loader.events:emit("mod.options_changed",
+          { mod = mod.id, key = key, value = value })
+      end
+    end
+  end
+
+  local function optionRows()
+    local out = {}
+    for _, sourceRow in ipairs(optionSchema) do
+      local row = sourceRow
+      local rendered = {
+        id = "modern_pokedex_ui_" .. row.key,
+        label = nestedLabels[row.key] or row.label or row.key,
+      }
+      if row.type == "toggle" then
+        rendered.value = function()
+          return mod.options:get(row.key) and "ON" or "OFF"
+        end
+        rendered.step = function(game)
+          setOption(game, row.key, not mod.options:get(row.key))
+          return true
+        end
+      elseif row.type == "choice" then
+        rendered.value = function()
+          local current = mod.options:get(row.key)
+          for _, choice in ipairs(row.choices or {}) do
+            if choice[2] == current then return choice[1] end
+          end
+          return "----"
+        end
+        rendered.step = function(game, direction)
+          local choices = row.choices or {}
+          if #choices == 0 then return false end
+          local current = mod.options:get(row.key)
+          local index = 1
+          for i, choice in ipairs(choices) do
+            if choice[2] == current then index = i break end
+          end
+          index = (index - 1 + (direction or 1)) % #choices + 1
+          setOption(game, row.key, choices[index][2])
+          return true
+        end
+      end
+      out[#out + 1] = rendered
+    end
+    return out
+  end
+
+  -- Match the other Modern UI mods: the ordinary Options menu gains one
+  -- concise entry, while the individual settings live on their own nested
+  -- Options-style page. The mod manager and this page share the same saved
+  -- values and live loader state.
+  mod.hooks:wrap("ui.options.rows", function(next, game, rows)
+    local out = next(game, rows)
+    if type(out) ~= "table" then return out end
+    out[#out + 1] = {
+      id = "modern_pokedex_ui",
+      -- Keep the main-row label inside the 128px option-box text area. The
+      -- opened page is exclusively this mod's settings, so the trailing UI
+      -- adds no useful distinction there.
+      label = "MODERN POKEDEX",
+      value = function() return "OPEN" end,
+      activate = function(activeGame)
+        local OptionsMenu = require("src.ui.OptionsMenu")
+        local page = OptionsMenu.new(activeGame)
+        page.rows = optionRows()
+        page.index, page.scroll = 1, 0
+        activeGame.stack:push(page)
+      end,
+    }
+    return out
+  end)
 
   local crystal251 = mod.find("CRYSTAL_251")
   local usefulMoveInfo = mod.find("useful_move_info")
