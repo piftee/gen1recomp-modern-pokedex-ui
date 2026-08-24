@@ -64,8 +64,6 @@ return function(mod, compatibility)
   local wildsIconDefs = {}
   local wildsIconAlphaMasks = {}
   local spriteCache = {}
-  local spriteRunCache = {}
-  local scaledSpriteRunCache = setmetatable({}, { __mode = "k" })
   local inkShader
 
   if Assets.register then
@@ -75,8 +73,6 @@ return function(mod, compatibility)
       wildsIconDefs = {}
       wildsIconAlphaMasks = {}
       spriteCache = {}
-      spriteRunCache = {}
-      scaledSpriteRunCache = setmetatable({}, { __mode = "k" })
     end)
   end
 
@@ -658,94 +654,17 @@ return function(mod, compatibility)
       regions, exactRuns)
   end
 
-  local function visibleRuns(data)
-    if not data or type(data.getDimensions) ~= "function"
-        or type(data.getPixel) ~= "function" then return nil end
-    local width, height = data:getDimensions()
-    local runs = {}
-    for y = 0, height - 1 do
-      local start
-      for x = 0, width do
-        local visible = false
-        if x < width then
-          local _, _, _, alpha = data:getPixel(x, y)
-          visible = (alpha or 1) > 0
-        end
-        if visible and not start then
-          start = x
-        elseif not visible and start then
-          runs[#runs + 1] = { x = start, y = y, w = x - start }
-          start = nil
-        end
-      end
-    end
-    return runs
-  end
-
-  -- True-colour protection is applied after the palette pass by redrawing
-  -- only the portrait's opaque pixels. A source-space run cannot simply be
-  -- multiplied by a fractional scale: its fractional scissor edges do not
-  -- necessarily cover the same destination pixels selected by nearest
-  -- filtering, which leaves alternating rows to inherit the card palette.
-  -- Re-sample the alpha runs onto the final integer pixel grid instead.
-  local function scaledVisibleRuns(runs, width, height, scale)
-    if not runs or #runs == 0 then return {} end
-    local byScale = scaledSpriteRunCache[runs]
-    if not byScale then
-      byScale = {}
-      scaledSpriteRunCache[runs] = byScale
-    end
-    local key = table.concat({ width, height, tostring(scale) }, ":")
-    if byScale[key] then return byScale[key] end
-
-    local sourceRows = {}
-    for _, run in ipairs(runs) do
-      local row = sourceRows[run.y]
-      if not row then row = {}; sourceRows[run.y] = row end
-      row[#row + 1] = { run.x, run.x + run.w }
-    end
-
-    -- Pixel centres determine the nearest source texel. Rounding the drawn
-    -- extent the same way gives a mask that is pixel-for-pixel with LÖVE's
-    -- nearest-neighbour result, including compact family cards.
-    local drawW = math.max(1, math.floor(width * scale + 0.5))
-    local drawH = math.max(1, math.floor(height * scale + 0.5))
-    local result = {}
-    for y = 0, drawH - 1 do
-      local sourceY = math.min(height - 1,
-        math.floor((y + 0.5) / scale))
-      local row = sourceRows[sourceY]
-      local start
-      for x = 0, drawW do
-        local visible = false
-        if x < drawW and row then
-          local sourceX = math.min(width - 1,
-            math.floor((x + 0.5) / scale))
-          for _, interval in ipairs(row) do
-            if sourceX >= interval[1] and sourceX < interval[2] then
-              visible = true
-              break
-            end
-          end
-        end
-        if visible and start == nil then
-          start = x
-        elseif not visible and start ~= nil then
-          result[#result + 1] = { x = start, y = y, w = x - start }
-          start = nil
-        end
-      end
-    end
-    byScale[key] = result
-    return result
-  end
-
-  local function preparedSprite(path, key, colors)
+  -- Keep the battle portrait pipeline identical to Modern Party UI. Android
+  -- GPUs proved particularly sensitive to the older Pokédex-only path that
+  -- first split alpha into horizontal runs and then restored each run after
+  -- the palette pass: physical-pixel scissor rounding could stripe, tint, or
+  -- erase the portrait. Bake the four species colours once, preserve only
+  -- edge-connected matte, and protect one stable composite rectangle.
+  local function maskedPaletteSprite(path, key, colors)
     local cached = spriteCache[key]
-    if cached ~= nil then return cached or nil, spriteRunCache[key] end
+    if cached ~= nil then return cached or nil end
     cached = false
-    local runs
-    if love.image and love.image.newImageData then
+    if colors and love.image and love.image.newImageData then
       local okData, data = pcall(Assets.imageData, path)
       if okData and data and type(data.mapPixel) == "function" then
         local width, height = data:getDimensions()
@@ -753,7 +672,7 @@ return function(mod, compatibility)
         for y = 0, height - 1 do
           for x = 0, width - 1 do
             local _, _, _, alpha = data:getPixel(x, y)
-            if (alpha or 1) <= 0 then
+            if (alpha or 0) <= 0 then
               hasTransparency = true
               break
             end
@@ -764,11 +683,6 @@ return function(mod, compatibility)
         local function pixelIndex(x, y) return y * width + x + 1 end
         local function matte(x, y)
           local r, g, b, a = data:getPixel(x, y)
-          -- Transparent sprite sheets already identify their background
-          -- exactly. Treating adjacent white artwork as a second matte lets
-          -- the flood fill walk into highlights and body pixels, carving
-          -- horizontal gaps through scaled Crystal/HGSS portraits. Only
-          -- infer a near-white matte when the source has no alpha at all.
           return a <= 0 or (not hasTransparency
             and r > 0.83 and g > 0.83 and b > 0.83)
         end
@@ -789,27 +703,19 @@ return function(mod, compatibility)
         end
         data:mapPixel(function(x, y, r, g, b, a)
           if a <= 0 or outside[pixelIndex(x, y)] then return r, g, b, 0 end
-          if colors then
-            local color = r > 0.83 and colors[1]
-              or r > 0.5 and colors[2]
-              or r > 0.17 and colors[3] or colors[4]
-            return color[1] / 255, color[2] / 255,
-              color[3] / 255, a
-          end
-          return r, g, b, a
+          local color = r > 0.83 and colors[1]
+            or r > 0.5 and colors[2]
+            or r > 0.17 and colors[3] or colors[4]
+          return color[1] / 255, color[2] / 255,
+            color[3] / 255, a
         end)
-        runs = visibleRuns(data)
         local made, image = pcall(love.graphics.newImage, data)
         cached = made and image or false
         if cached and cached.setFilter then cached:setFilter("nearest", "nearest") end
       end
     end
-    if not cached then
-      local ok, image = pcall(Assets.image, path)
-      cached = ok and image or false
-    end
-    spriteCache[key], spriteRunCache[key] = cached, runs
-    return cached or nil, runs
+    spriteCache[key] = cached
+    return cached or nil
   end
 
   local function spriteFor(game, def)
@@ -821,14 +727,14 @@ return function(mod, compatibility)
       { kind = "battle" })
     if not path then return nil, false end
 
-    local function rawSprite()
-      local image, runs = preparedSprite(path, path .. "#raw")
-      return image, runs
-    end
-
     if trueColor then
-      local image, runs = rawSprite()
-      return image, true, nil, runs
+      local cached = spriteCache[path]
+      if cached == nil then
+        local ok, image = pcall(Assets.image, path)
+        cached = ok and image or false
+        spriteCache[path] = cached
+      end
+      return cached or nil, cached and true or false
     end
 
     -- Bake the grayscale battle artwork through the species' own Pokémon
@@ -847,19 +753,20 @@ return function(mod, compatibility)
       values[#values + 1] = tostring(color[3] or 0)
     end
     local key = path .. "#species:" .. table.concat(values, ":")
-    local image, runs = preparedSprite(path, key, colors)
-    if image then return image, true, artPalette, runs end
-    local raw, rawRuns = rawSprite()
-    return raw, false, artPalette, rawRuns
+    local image = maskedPaletteSprite(path, key, colors)
+    if image then return image, true, artPalette end
+    local ok, raw = pcall(Assets.image, path)
+    return ok and raw or nil, false, artPalette
   end
 
-  local function drawSprite(game, def, rect, regions, known, colors, faceShade)
+  local function drawSprite(game, def, rect, regions, known, colors, faceShade,
+      protection)
     if not known then
       drawCentered("?", rect.x, rect.y + math.floor((rect.h - 8) / 2),
         rect.w, DARK)
       return
     end
-    local image, protected, artPalette, runs = spriteFor(game, def)
+    local image, protected, artPalette = spriteFor(game, def)
     if not image then return end
     local sw, sh = image:getDimensions()
     local scale = math.min(1, rect.w / math.max(1, sw),
@@ -871,7 +778,62 @@ return function(mod, compatibility)
       shader = PaletteFX.keyedShader and PaletteFX.keyedShader() or nil
       protected = shader ~= nil
     end
+    -- Composite the whole portrait well, rather than a tight rectangle around
+    -- the source canvas. A tight guard makes the source dimensions readable
+    -- as a faint frame when Android converts the UI palette in physical
+    -- pixels. The well already belongs to the same card zone, so protecting
+    -- it as one stable rectangle is both seamless and renderer-safe.
+    local composite = protection or {
+      x = math.floor(rect.x) - 2, y = math.floor(rect.y) - 2,
+      w = math.max(1, math.floor(rect.w) + 4),
+      h = math.max(1, math.floor(rect.h) + 4),
+    }
     love.graphics.push("all")
+    if protected then
+      -- Match Modern Party UI's Android-safe portrait treatment. The
+      -- screen-wide palette pass cannot redraw hundreds of one-pixel alpha
+      -- scissors reliably once Android applies its physical-pixel scale.
+      -- Composite onto the card's final face colour instead, then restore
+      -- one stable rectangle. The backing is visually transparent because
+      -- it is exactly the colour the card will have after the palette pass.
+      local shade = composite.faceShade or faceShade or LIGHT
+      if not composite.faceShade and darkTheme() then
+        if shade == LIGHT then shade = DARK
+        elseif shade == WHITE then shade = BLACK end
+      end
+      local faceColors = PaletteFX.effectiveColors(colors)
+        or PaletteFX.GRAYS
+      local function finalColor(value, fallback)
+        local index = value > (WHITE + LIGHT) / 2 and 1
+          or value > (LIGHT + DARK) / 2 and 2
+          or value > (DARK + BLACK) / 2 and 3 or 4
+        return faceColors[index] or fallback
+      end
+      if composite.edgeShade then
+        local edge = finalColor(composite.edgeShade, { 0, 0, 0 })
+        love.graphics.setColor(edge[1] / 255, edge[2] / 255,
+          edge[3] / 255, 1)
+        love.graphics.rectangle("fill", composite.x, composite.y,
+          composite.w, composite.h)
+      end
+      local face = finalColor(shade, { 170, 170, 170 })
+      love.graphics.setColor(face[1] / 255, face[2] / 255,
+        face[3] / 255, 1)
+      if composite.cut then
+        chamfer("fill", composite.x, composite.y,
+          composite.w, composite.h, composite.cut)
+      else
+        love.graphics.rectangle("fill", composite.x, composite.y,
+          composite.w, composite.h)
+      end
+      if composite.accent then
+        local accent = finalColor(composite.accent.shade, { 85, 85, 85 })
+        love.graphics.setColor(accent[1] / 255, accent[2] / 255,
+          accent[3] / 255, 1)
+        love.graphics.rectangle("fill", composite.accent.x,
+          composite.accent.y, composite.accent.w, composite.accent.h)
+      end
+    end
     if shader then
       love.graphics.setShader(shader)
       PaletteFX.sendColors(shader, artPalette)
@@ -880,11 +842,7 @@ return function(mod, compatibility)
     love.graphics.draw(image, x, y, 0, scale, scale)
     love.graphics.pop()
     if protected then
-      for _, run in ipairs(scaledVisibleRuns(runs, sw, sh, scale)) do
-        regions[#regions + 1] = {
-          x = x + run.x, y = y + run.y, w = run.w, h = 1,
-        }
-      end
+      regions[#regions + 1] = composite
     end
   end
 
@@ -1190,9 +1148,26 @@ return function(mod, compatibility)
     local def, known = row.def, row.seen
     local pad = 6
     local spriteH = math.max(40, math.min(62, rect.h - 45))
+    -- The wide browsing preview is one continuous card. Protecting only its
+    -- portrait area leaves a horizontal true-colour restoration boundary
+    -- across Android landscape displays. Rebuild and protect the complete
+    -- inner face instead, including the selected-card accent, so every edge
+    -- coincides with the card's intentional chamfered structure.
+    local previewProtection = {
+      x = rect.x + 2, y = rect.y + 2,
+      w = math.max(1, rect.w - 6), h = math.max(1, rect.h - 6),
+      cut = 2,
+      edgeShade = darkTheme() and WHITE or BLACK,
+      faceShade = darkTheme() and DARK or LIGHT,
+      accent = {
+        x = rect.x + 2, y = rect.y + 6,
+        w = 2, h = math.max(1, rect.h - 12),
+        shade = darkTheme() and LIGHT or DARK,
+      },
+    }
     drawSprite(screen.game, def, { x = rect.x + pad, y = rect.y + 5,
       w = rect.w - pad * 2, h = spriteH }, regions, known,
-      paletteFor(def), LIGHT)
+      paletteFor(def), LIGHT, previewProtection)
     local infoY = rect.y + spriteH + 5
     local digits = (screen.game.data.constants or {}).dexDigits or 3
     drawText(("No.%0" .. digits .. "d"):format(def.dex or 0),

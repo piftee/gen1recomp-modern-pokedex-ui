@@ -216,6 +216,16 @@ for _, rect in ipairs(PaletteFX.trueColorRects("ui")) do
 end
 T.check(exactIconRuns > 0 and not broadIconClaim,
   "only visible icon pixels bypass the screen palette")
+local completePreviewClaim = false
+for _, rect in ipairs(PaletteFX.trueColorRects("ui")) do
+  if rect.x == 164 and rect.y == 23
+      and rect.w == 84 and rect.h == 103 then
+    completePreviewClaim = true
+    break
+  end
+end
+T.check(completePreviewClaim,
+  "the widescreen browsing preview protects its complete chamfered face")
 for _, selected in ipairs(listSelectionStates) do
   T.check(not selected,
     "list focus never asks an icon renderer for a darkened selected state")
@@ -367,15 +377,14 @@ for _, rect in ipairs(uiRects) do
 end
 T.check(not inheritedClaim,
   "an opaque entry clears inherited list-icon claims before drawing")
-local exactPortraitRuns, broadPortraitClaim = 0, false
+local broadPortraitClaim = false
 for _, rect in ipairs(uiRects) do
   if rect.x >= 4 and rect.x < 100 and rect.y >= 21 and rect.y < 90 then
-    if rect.h <= 1 then exactPortraitRuns = exactPortraitRuns + 1 end
     if rect.h > 2 then broadPortraitClaim = true end
   end
 end
-T.check(exactPortraitRuns > 0 and not broadPortraitClaim,
-  "battle portraits protect only visible pixels, without a rectangular matte")
+T.check(broadPortraitClaim,
+  "battle portraits publish one Android-safe composited card region")
 local usedSpeciesPalette = false
 for _, species in ipairs(portraitPaletteSpecies) do
   if species == "FIXMON_A" then usedSpeciesPalette = true break end
@@ -649,10 +658,11 @@ local pixelAlignedFamilyMarks = #familySpriteMarks > 0
 for _, rect in ipairs(familySpriteMarks) do
   pixelAlignedFamilyMarks = pixelAlignedFamilyMarks
     and rect.x == math.floor(rect.x) and rect.y == math.floor(rect.y)
-    and rect.w == math.floor(rect.w) and rect.h == 1
+    and rect.w == math.floor(rect.w) and rect.h == math.floor(rect.h)
+    and rect.w > 2 and rect.h > 2
 end
 T.check(pixelAlignedFamilyMarks,
-  "scaled FAMILY portraits protect complete destination-pixel rows")
+  "scaled FAMILY portraits use stable integer compositing rectangles")
 local stackDepth = #stack.states
 press(familyEntry, "a")
 T.eq(#stack.states, stackDepth,
