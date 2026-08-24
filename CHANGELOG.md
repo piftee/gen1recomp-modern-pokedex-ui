@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.3] - 2026-08-24
+
+### Changed
+
+- Large SGB portraits that use the pale `REDMON`, `YELLOWMON`, or `BROWNMON`
+  ramps now borrow the stronger equivalent midtones from the bundled Advanced
+  palette pack. Orange and yellow Pokémon retain readable detail without
+  changing cool-coloured species, true-colour replacements, or other display
+  modes.
+
+### Fixed
+
+- Portrait colour protection now follows the exact inner face of every
+  preview, INFO, STATS, and FAMILY card. Android landscape scaling can no
+  longer make sprite guards overlap black frames, erase unselected insets, or
+  expose a faint edge around the artwork.
+
 ## [0.2.2] - 2026-08-24
 
 ### Fixed
