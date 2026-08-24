@@ -30,7 +30,7 @@ data.palettes = {
     PURPLEMON = { { 255, 255, 255 }, { 215, 170, 230 },
       { 130, 70, 160 }, { 0, 0, 0 } },
   },
-  pokemon = {},
+  pokemon = { FIXMON_C = "REDMON" },
 }
 data.pokemon.FIXMON_A.extraAbilities = { "OVERGROW" }
 data.pokemon.FIXMON_A.name = "ALPHAMON"
@@ -378,13 +378,19 @@ end
 T.check(not inheritedClaim,
   "an opaque entry clears inherited list-icon claims before drawing")
 local broadPortraitClaim = false
+local exactProfileFaceClaim = false
 for _, rect in ipairs(uiRects) do
   if rect.x >= 4 and rect.x < 100 and rect.y >= 21 and rect.y < 90 then
     if rect.h > 2 then broadPortraitClaim = true end
   end
+  if rect.x == 6 and rect.y == 23 and rect.w == 90 and rect.h == 103 then
+    exactProfileFaceClaim = true
+  end
 end
 T.check(broadPortraitClaim,
   "battle portraits publish one Android-safe composited card region")
+T.check(exactProfileFaceClaim,
+  "wide INFO portraits protect the exact inner face without touching its frame")
 local usedSpeciesPalette = false
 for _, species in ipairs(portraitPaletteSpecies) do
   if species == "FIXMON_A" then usedSpeciesPalette = true break end
@@ -439,6 +445,13 @@ T.check(alphaOK,
   "an alpha-backed portrait draws headlessly: " .. tostring(alphaErr))
 T.eq(alphaPixels[1][1][4], 1,
   "transparent portraits retain white artwork touching their silhouette")
+local vividRed = PaletteFX.gbcPack().palettes.REDMON[3]
+T.eq(math.floor(alphaPixels[1][2][1] * 255 + 0.5), vividRed[1],
+  "SGB warm portraits borrow the stronger Advanced red midpoint")
+T.eq(math.floor(alphaPixels[1][2][2] * 255 + 0.5), vividRed[2],
+  "SGB warm portrait contrast keeps the intended green channel")
+T.eq(math.floor(alphaPixels[1][2][3] * 255 + 0.5), vividRed[3],
+  "SGB warm portrait contrast keeps the intended blue channel")
 
 press(entry, "right")
 T.eq(entry.modernDexPages[entry.modernDexPage].id, "stats",
@@ -663,6 +676,12 @@ for _, rect in ipairs(familySpriteMarks) do
 end
 T.check(pixelAlignedFamilyMarks,
   "scaled FAMILY portraits use stable integer compositing rectangles")
+T.eq(#familySpriteMarks, 2,
+  "each known FAMILY portrait publishes one stable card-face guard")
+T.same(familySpriteMarks, {
+  { x = 34, y = 47, w = 66, h = 54 },
+  { x = 153, y = 47, w = 66, h = 54 },
+}, "FAMILY portrait guards stop precisely inside every black card frame")
 local stackDepth = #stack.states
 press(familyEntry, "a")
 T.eq(#stack.states, stackDepth,

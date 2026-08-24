@@ -210,6 +210,33 @@ return function(mod, compatibility)
     end
   end
 
+  -- A true-colour portrait must restore the complete card face on Android,
+  -- but never the structural frame around it. Keep this geometry in one
+  -- place with panel() so the protected region cannot drift into the black
+  -- border or its lower-right shadow as card sizes change.
+  local function panelFaceProtection(x, y, w, h, selected)
+    local protection = {
+      x = math.floor(x + 2), y = math.floor(y + 2),
+      w = math.max(1, math.floor(w - 6)),
+      h = math.max(1, math.floor(h - 6)),
+      cut = 2,
+      edgeShade = darkTheme()
+          and (selected and WHITE or DARK)
+        or (selected and BLACK or WHITE),
+      faceShade = darkTheme()
+          and (selected and DARK or BLACK)
+        or (selected and LIGHT or WHITE),
+    }
+    if selected then
+      protection.accent = {
+        x = math.floor(x + 2), y = math.floor(y + 6),
+        w = 2, h = math.max(1, math.floor(h - 12)),
+        shade = darkTheme() and LIGHT or DARK,
+      }
+    end
+    return protection
+  end
+
   local function insetSurface(x, y, w, h, cut, lightShade)
     if darkTheme() then
       gray(DARK)
@@ -277,6 +304,27 @@ return function(mod, compatibility)
   local function basePalette(game)
     return PaletteFX.pal(game.data, "BLUEMON")
       or PaletteFX.pal(game.data, "MEWMON") or PaletteFX.GRAYS
+  end
+
+  local WARM_SGB_PORTRAITS = {
+    REDMON = true, YELLOWMON = true, BROWNMON = true,
+  }
+
+  -- SGB's authentic warm monster ramps are intentionally pale because they
+  -- were designed to colour a small 160x144 tile portrait. Once that artwork
+  -- becomes a large, isolated card image, the orange and yellow midtones lose
+  -- too much separation from white. Keep the SGB interface untouched, but use
+  -- the bundled Advanced pack's stronger equivalent ramp for those three
+  -- warm grayscale portraits. Every other SGB hue, authored true-colour art,
+  -- and every non-SGB display mode retains its original palette.
+  local function portraitArtPalette(data, species)
+    local palette = PaletteFX.monPal(data, species)
+    local mode = PaletteFX.mode
+    if mode ~= "gbc" and mode ~= "gbc_inv" then return palette end
+    local name = PaletteFX.monPalName(data, species)
+    if not WARM_SGB_PORTRAITS[name] then return palette end
+    local pack = PaletteFX.gbcPack and PaletteFX.gbcPack() or nil
+    return pack and pack.palettes and pack.palettes[name] or palette
   end
 
   local function backdrop(layout)
@@ -742,7 +790,7 @@ return function(mod, compatibility)
     -- no longer inherits that card palette (e.g. Pidgey stays brown on a
     -- neutral Normal card). Edge-connected white is matte; enclosed white
     -- details such as eyes and highlights remain part of the artwork.
-    local artPalette = PaletteFX.monPal(game.data, def.id)
+    local artPalette = portraitArtPalette(game.data, def.id)
       or PaletteFX.pal(game.data, "MEWMON") or PaletteFX.GRAYS
     local colors = PaletteFX.effectiveColors(artPalette)
     local values = {}
@@ -779,14 +827,13 @@ return function(mod, compatibility)
       protected = shader ~= nil
     end
     -- Composite the whole portrait well, rather than a tight rectangle around
-    -- the source canvas. A tight guard makes the source dimensions readable
-    -- as a faint frame when Android converts the UI palette in physical
-    -- pixels. The well already belongs to the same card zone, so protecting
-    -- it as one stable rectangle is both seamless and renderer-safe.
+    -- the source canvas. Callers displaying a framed card provide its exact
+    -- inner-face geometry. The conservative fallback stays within the sprite
+    -- well and can therefore never overpaint an unknown structural frame.
     local composite = protection or {
-      x = math.floor(rect.x) - 2, y = math.floor(rect.y) - 2,
-      w = math.max(1, math.floor(rect.w) + 4),
-      h = math.max(1, math.floor(rect.h) + 4),
+      x = math.floor(rect.x), y = math.floor(rect.y),
+      w = math.max(1, math.floor(rect.w)),
+      h = math.max(1, math.floor(rect.h)),
     }
     love.graphics.push("all")
     if protected then
@@ -1153,18 +1200,8 @@ return function(mod, compatibility)
     -- across Android landscape displays. Rebuild and protect the complete
     -- inner face instead, including the selected-card accent, so every edge
     -- coincides with the card's intentional chamfered structure.
-    local previewProtection = {
-      x = rect.x + 2, y = rect.y + 2,
-      w = math.max(1, rect.w - 6), h = math.max(1, rect.h - 6),
-      cut = 2,
-      edgeShade = darkTheme() and WHITE or BLACK,
-      faceShade = darkTheme() and DARK or LIGHT,
-      accent = {
-        x = rect.x + 2, y = rect.y + 6,
-        w = 2, h = math.max(1, rect.h - 12),
-        shade = darkTheme() and LIGHT or DARK,
-      },
-    }
+    local previewProtection = panelFaceProtection(
+      rect.x, rect.y, rect.w, rect.h, true)
     drawSprite(screen.game, def, { x = rect.x + pad, y = rect.y + 5,
       w = rect.w - pad * 2, h = spriteH }, regions, known,
       paletteFor(def), LIGHT, previewProtection)
@@ -1550,28 +1587,30 @@ return function(mod, compatibility)
   end
 
   local function drawProfileCard(state, layout, regions, metadata)
-    panel(layout.profile.x, layout.profile.y,
-      layout.profile.w, layout.profile.h, true)
+    local profile = layout.profile
+    panel(profile.x, profile.y, profile.w, profile.h, true)
     local spriteH = metadata and (layout.wide and 54 or 42)
       or (layout.wide and 67 or 51)
     drawSprite(state.game, state.def, {
-      x = layout.profile.x + 4, y = layout.profile.y + 4,
-      w = layout.profile.w - 8, h = spriteH,
-    }, regions, true, paletteFor(state.def), LIGHT)
-    drawCentered(state.def.name or "?", layout.profile.x + 4,
-      layout.profile.y + spriteH + 5, layout.profile.w - 8, WHITE)
+      x = profile.x + 4, y = profile.y + 4,
+      w = profile.w - 8, h = spriteH,
+    }, regions, true, paletteFor(state.def), LIGHT,
+      panelFaceProtection(profile.x, profile.y,
+        profile.w, profile.h, true))
+    drawCentered(state.def.name or "?", profile.x + 4,
+      profile.y + spriteH + 5, profile.w - 8, WHITE)
     local iconSize = layout.wide and 22 or 17
     if not metadata then
       drawIcon(state.game, state.def,
-        layout.profile.x + layout.profile.w - iconSize - 5,
-        layout.profile.y + layout.profile.h - iconSize - 5,
+        profile.x + profile.w - iconSize - 5,
+        profile.y + profile.h - iconSize - 5,
         iconSize, false, state.modernDexClock, regions)
     end
     if metadata then
-      local y = layout.profile.y + spriteH + 17
+      local y = profile.y + spriteH + 17
       for _, line in ipairs(metadata) do
-        drawText(line, layout.profile.x + 5, y,
-          layout.profile.w - 10, DARK)
+        drawText(line, profile.x + 5, y,
+          profile.w - 10, DARK)
         y = y + 10
       end
     end
@@ -1590,7 +1629,9 @@ return function(mod, compatibility)
       drawSprite(state.game, state.def, {
         x = profile.x + 4, y = profile.y + 4,
         w = profile.w - 8, h = profile.h - 8,
-      }, regions, true, paletteFor(state.def), LIGHT)
+      }, regions, true, paletteFor(state.def), LIGHT,
+        panelFaceProtection(profile.x, profile.y,
+          profile.w, profile.h, true))
     end
     panel(layout.info.x, layout.info.y, layout.info.w, layout.info.h, false)
     drawText(("No.%0" .. digits .. "d"):format(state.def.dex or 0),
@@ -1796,7 +1837,9 @@ return function(mod, compatibility)
       drawSprite(state.game, state.def, {
         x = portrait.x + 4, y = portrait.y + 4,
         w = portrait.w - 8, h = portrait.h - 8,
-      }, regions, true, paletteFor(state.def), LIGHT)
+      }, regions, true, paletteFor(state.def), LIGHT,
+        panelFaceProtection(portrait.x, portrait.y,
+          portrait.w, portrait.h, true))
 
       local summary = layout.statsSummary
       panel(summary.x, summary.y, summary.w, summary.h, false)
@@ -1978,17 +2021,25 @@ return function(mod, compatibility)
       local selected = index == cursor
       local known = familyMemberKnown(state, member)
       panel(rect.x, rect.y, rect.w, rect.h, selected)
+      if known then
+        drawSprite(state.game, member.def, {
+          x = rect.x + 4, y = rect.y + 3,
+          w = rect.w - 8, h = rect.h - 17,
+        }, regions, true, paletteFor(member.def),
+          selected and LIGHT or WHITE,
+          panelFaceProtection(rect.x, rect.y,
+            rect.w, rect.h, selected))
+      end
+      -- The unselected inset is deliberately drawn after the protected
+      -- portrait face, then its label is drawn last. This keeps both the
+      -- one-pixel inset and the text crisp without letting either become part
+      -- of the sprite guard.
       if not selected then
         gray(DARK)
         chamfer("line", rect.x + 1, rect.y + 1,
           rect.w - 4, rect.h - 4, 2)
       end
       if known then
-        drawSprite(state.game, member.def, {
-          x = rect.x + 4, y = rect.y + 3,
-          w = rect.w - 8, h = rect.h - 17,
-        }, regions, true, paletteFor(member.def),
-          selected and LIGHT or WHITE)
         drawCentered(member.def.name, rect.x + 2,
           rect.y + rect.h - 10, rect.w - 4,
           selected and WHITE or BLACK)
