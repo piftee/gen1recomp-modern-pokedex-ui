@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.2] - 2026-08-24
+
+### Fixed
+
+- Replaced the Pokédex-only per-row portrait restoration path with the same
+  stable card compositing used by Modern Party UI. Android renderers no longer
+  stripe, tint, erase, or frame battle sprites when the display is scaled.
+- Widescreen browsing now protects the complete chamfered preview face and its
+  accent as one region, removing the horizontal seam visible in landscape
+  without changing the Pokémon's authored colours.
+
 ## [0.2.1] - 2026-08-24
 
 ### Added
