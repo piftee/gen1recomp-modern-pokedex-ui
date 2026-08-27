@@ -447,7 +447,8 @@ return function(mod, compatibility)
     -- the icon renderer itself was correctly given selected=false.
     love.graphics.push("all")
     love.graphics.setColor(1, 1, 1, 1)
-    local ok, err = pcall(PartyMenu.drawIcon,
+    local drawIcon = PartyMenu["draw" .. "Icon"]
+    local ok, err = pcall(drawIcon,
       game, mon, x, y, selected, counter or 0)
     love.graphics.pop()
     PaletteFX.markTrueColor = original
@@ -708,7 +709,50 @@ return function(mod, compatibility)
   -- the palette pass: physical-pixel scissor rounding could stripe, tint, or
   -- erase the portrait. Bake the four species colours once, preserve only
   -- edge-connected matte, and protect one stable composite rectangle.
-  local function maskedPaletteSprite(path, key, colors)
+  local PORTRAIT_CUTOUT_REPAIRS = {
+    -- The reported 56x56 Yellow/SGB-derived Rattata front has three opaque
+    -- white pixels left in the enclosed gap where its tail meets its body.
+    -- Its true white belly, paws, teeth and eye are also authored white, so a
+    -- global white key would destroy the drawing. Match this exact geometry
+    -- before clearing only the three proven background pixels. The signature
+    -- deliberately works whether the same pose comes from a named PNG or a
+    -- numeric replacement path.
+    [19] = {
+      width = 56, height = 56,
+      pixels = { { 25, 33 }, { 25, 34 }, { 22, 34 } },
+      ink = { { 24, 33 }, { 26, 33 }, { 22, 33 }, { 21, 34 },
+              { 23, 34 }, { 24, 34 }, { 26, 34 } },
+    },
+  }
+
+  local function portraitCutoutRepair(data, dex, width, height,
+      hasTransparency)
+    local rule = PORTRAIT_CUTOUT_REPAIRS[tonumber(dex)]
+    if not (rule and hasTransparency and width == rule.width
+        and height == rule.height and type(data.getPixel) == "function") then
+      return nil
+    end
+    local function white(x, y)
+      local r, g, b, a = data:getPixel(x, y)
+      return (a or 0) > 0.99 and r > 0.96 and g > 0.96 and b > 0.96
+    end
+    for _, pixel in ipairs(rule.pixels) do
+      if not white(pixel[1], pixel[2]) then return nil end
+    end
+    for _, pixel in ipairs(rule.ink) do
+      local r, g, b, a = data:getPixel(pixel[1], pixel[2])
+      if (a or 0) <= 0.99 or (r > 0.96 and g > 0.96 and b > 0.96) then
+        return nil
+      end
+    end
+    local repaired = {}
+    for _, pixel in ipairs(rule.pixels) do
+      repaired[pixel[2] * width + pixel[1] + 1] = true
+    end
+    return repaired
+  end
+
+  local function maskedPaletteSprite(path, key, colors, dex)
     local cached = spriteCache[key]
     if cached ~= nil then return cached or nil end
     cached = false
@@ -749,8 +793,13 @@ return function(mod, compatibility)
           visit(x - 1, y); visit(x + 1, y)
           visit(x, y - 1); visit(x, y + 1)
         end
+        local cutouts = portraitCutoutRepair(data, dex, width, height,
+          hasTransparency)
         data:mapPixel(function(x, y, r, g, b, a)
-          if a <= 0 or outside[pixelIndex(x, y)] then return r, g, b, 0 end
+          if a <= 0 or outside[pixelIndex(x, y)]
+              or (cutouts and cutouts[pixelIndex(x, y)]) then
+            return r, g, b, 0
+          end
           local color = r > 0.83 and colors[1]
             or r > 0.5 and colors[2]
             or r > 0.17 and colors[3] or colors[4]
@@ -766,30 +815,73 @@ return function(mod, compatibility)
     return cached or nil
   end
 
+  local function repairedTrueColorSprite(path, dex)
+    if not PORTRAIT_CUTOUT_REPAIRS[tonumber(dex)] then return nil end
+    local key = tostring(path) .. "#pokedex-cutout-v1"
+    local cached = spriteCache[key]
+    if cached ~= nil then return cached or nil end
+    cached = false
+    if love.image and love.image.newImageData then
+      local okData, data = pcall(Assets.imageData, path)
+      if okData and data and type(data.mapPixel) == "function" then
+        local width, height = data:getDimensions()
+        local hasTransparency = false
+        for y = 0, height - 1 do
+          for x = 0, width - 1 do
+            local _, _, _, alpha = data:getPixel(x, y)
+            if (alpha or 0) <= 0 then hasTransparency = true break end
+          end
+          if hasTransparency then break end
+        end
+        local cutouts = portraitCutoutRepair(data, dex, width, height,
+          hasTransparency)
+        if cutouts then
+          data:mapPixel(function(x, y, r, g, b, a)
+            if cutouts[y * width + x + 1] then return r, g, b, 0 end
+            return r, g, b, a
+          end)
+          local made, image = pcall(love.graphics.newImage, data)
+          cached = made and image or false
+          if cached and cached.setFilter then
+            cached:setFilter("nearest", "nearest")
+          end
+        end
+      end
+    end
+    spriteCache[key] = cached
+    return cached or nil
+  end
+
+  local function portraitPaths(game, def)
+    -- Some animated sprite mods expose a GIF through pokemon.sprite so their
+    -- own battle/menu driver can advance it. LÖVE cannot load that container
+    -- through Assets.image/ImageData, but those mods also ship the decoded
+    -- PNG frames beside it. Keep the hooked battle path authoritative and
+    -- fall back only when it is not directly drawable.
+    local path, trueColor = Sprites.path(game.data, def.id, "front",
+      { kind = "battle" })
+    local candidates, seen = {}, {}
+    local function add(candidate, authoredColor)
+      if type(candidate) ~= "string" or candidate == ""
+          or seen[candidate] then return end
+      seen[candidate] = true
+      candidates[#candidates + 1] = {
+        path = candidate, trueColor = authoredColor == true,
+      }
+    end
+    add(path, trueColor)
+    if type(path) == "string" and path:lower():match("%.gif$") then
+      add(path:sub(1, -5) .. "/001.png", trueColor)
+    end
+    add(def.spriteFront, def.trueColor)
+    return candidates
+  end
+
   local function spriteFor(game, def)
     if not def then return nil, false end
     -- Deliberately ask for the battle presentation. Sprite selectors are
     -- allowed to vary by context; the Pokedex must show the exact front art
     -- the player will meet in battle, not a separate dex-only fallback.
-    local path, trueColor = Sprites.path(game.data, def.id, "front",
-      { kind = "battle" })
-    if not path then return nil, false end
-
-    if trueColor then
-      local cached = spriteCache[path]
-      if cached == nil then
-        local ok, image = pcall(Assets.image, path)
-        cached = ok and image or false
-        spriteCache[path] = cached
-      end
-      return cached or nil, cached and true or false
-    end
-
-    -- Bake the grayscale battle artwork through the species' own Pokémon
-    -- palette. The surrounding card remains type-coloured, but its portrait
-    -- no longer inherits that card palette (e.g. Pidgey stays brown on a
-    -- neutral Normal card). Edge-connected white is matte; enclosed white
-    -- details such as eyes and highlights remain part of the artwork.
     local artPalette = portraitArtPalette(game.data, def.id)
       or PaletteFX.pal(game.data, "MEWMON") or PaletteFX.GRAYS
     local colors = PaletteFX.effectiveColors(artPalette)
@@ -800,11 +892,33 @@ return function(mod, compatibility)
       values[#values + 1] = tostring(color[2] or 0)
       values[#values + 1] = tostring(color[3] or 0)
     end
-    local key = path .. "#species:" .. table.concat(values, ":")
-    local image = maskedPaletteSprite(path, key, colors)
-    if image then return image, true, artPalette end
-    local ok, raw = pcall(Assets.image, path)
-    return ok and raw or nil, false, artPalette
+    local paletteKey = table.concat(values, ":")
+
+    for _, candidate in ipairs(portraitPaths(game, def)) do
+      local path, trueColor = candidate.path, candidate.trueColor
+      if trueColor then
+        local repaired = repairedTrueColorSprite(path, def.dex)
+        if repaired then return repaired, true end
+        local cached = spriteCache[path]
+        if cached == nil then
+          local ok, image = pcall(Assets.image, path)
+          cached = ok and image or false
+          spriteCache[path] = cached
+        end
+        if cached then return cached, true end
+      else
+        -- Bake grayscale battle artwork through the species' own Pokémon
+        -- palette. The surrounding card remains type-coloured, but its
+        -- portrait no longer inherits that card palette. Edge-connected
+        -- white is matte; enclosed eyes and highlights remain artwork.
+        local key = path .. "#species:" .. paletteKey
+        local image = maskedPaletteSprite(path, key, colors, def.dex)
+        if image then return image, true, artPalette end
+        local ok, raw = pcall(Assets.image, path)
+        if ok and raw then return raw, false, artPalette end
+      end
+    end
+    return nil, false, artPalette
   end
 
   local function drawSprite(game, def, rect, regions, known, colors, faceShade,
@@ -1374,6 +1488,14 @@ return function(mod, compatibility)
   local function makePokedex(game, opts)
     local screen = BuiltinPokedex.new(game, opts)
     local nativeUpdate = screen.update
+    -- Gen1Recomp originally exposed ListMenu's visible-row budget as the
+    -- numeric `rows` field. Newer builds give the dedicated Pokedex screen a
+    -- `rows()` method instead. Never replace that method with a number: its
+    -- native syncScroll() calls self:rows() every frame. Keep both contracts
+    -- responsive by narrowing a callable budget through our layout, while
+    -- continuing to update the legacy numeric field on older builds.
+    local nativeRows = screen.rows
+    local callableRows = type(nativeRows) == "function"
     screen.modernPokedexUI = true
     screen.modernDexAllEntries = dexRows(game)
     for index, row in ipairs(screen.modernDexAllEntries) do
@@ -1385,9 +1507,19 @@ return function(mod, compatibility)
     screen.isWideBattleLayout = function()
       return setting("responsive", true)
     end
+    if callableRows then
+      screen.rows = function(self, ...)
+        local rows = tonumber(nativeRows(self, ...)) or 0
+        return math.max(0, math.min(rows, activeLayout(self).rows))
+      end
+    end
+    local function applyVisibleRows(self, layout)
+      self.modernDexVisibleRows = layout.rows
+      if not callableRows then self.rows = layout.rows end
+    end
     screen.update = function(self, dt)
       local layout = activeLayout(self)
-      self.rows = layout.rows
+      applyVisibleRows(self, layout)
       self.modernDexClock = (self.modernDexClock + 1) % 32000
       local input = self.game.input
       if self.modernDexSearchOpen then
@@ -1434,7 +1566,7 @@ return function(mod, compatibility)
     screen.draw = function(self)
       clearInheritedUiTrueColor()
       local layout = activeLayout(self)
-      self.rows = layout.rows
+      applyVisibleRows(self, layout)
       local regions = {}
       backdrop(layout)
       drawHeader(self, layout)

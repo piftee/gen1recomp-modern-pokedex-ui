@@ -162,6 +162,57 @@ local realDimensions = graphics.getPixelDimensions
 graphics.getPixelDimensions = function() return 1280, 720 end
 T.eq(select(1, dex:uiSize()), 256,
   "the Pokedex uses the shared 256x144 widescreen surface")
+
+-- Recent Gen1Recomp builds moved the dedicated Pokedex away from ListMenu's
+-- numeric `rows` field and expose a rows() method used by syncScroll(). The
+-- mod must retain that callable contract while limiting it to the responsive
+-- layout's visible row count; replacing it with a number crashes on open.
+do
+  local realPokedex = package.loaded["src.ui.PokedexMenu"]
+  package.loaded["src.ui.PokedexMenu"] = {
+    new = function(methodGame)
+      local items = {}
+      for index = 1, 10 do
+        items[index] = { value = "FIXMON_A", label = tostring(index) }
+      end
+      local state = {
+        game = methodGame, items = items, index = 1, scroll = 0,
+      }
+      function state:rows() return math.min(7, #self.items) end
+      function state:syncScroll()
+        local rows = self:rows()
+        self.methodRowsObserved = rows
+        if self.index - self.scroll > rows then
+          self.scroll = self.index - rows
+        end
+      end
+      function state:update() self:syncScroll() end
+      return state
+    end,
+  }
+  local screenFactory = assert(loadfile("mods/modern_pokedex_ui/screen.lua"))()
+  local methodScreens = screenFactory({
+    options = { get = function(_, key)
+      if key == "responsive" then return true end
+      if key == "pattern" then return "grid" end
+      if key == "theme" then return "light" end
+    end },
+  }, {})
+  package.loaded["src.ui.PokedexMenu"] = realPokedex
+
+  local methodDex = methodScreens.pokedex.new(game)
+  T.eq(type(methodDex.rows), "function",
+    "method-based Gen1Recomp Pokedex keeps rows callable")
+  local updated, updateErr = pcall(methodDex.update, methodDex, 0)
+  T.check(updated,
+    "method-based Gen1Recomp Pokedex updates without rows crash: "
+      .. tostring(updateErr))
+  T.eq(methodDex.methodRowsObserved, 5,
+    "native syncScroll receives the responsive five-row budget")
+  T.eq(methodDex.modernDexVisibleRows, 5,
+    "the modern renderer records the same visible-row budget")
+end
+
 local realListIcon = PartyMenu.drawIcon
 local realListFont = Font.draw
 local realListImageData = Assets.imageData
@@ -452,6 +503,139 @@ T.eq(math.floor(alphaPixels[1][2][2] * 255 + 0.5), vividRed[2],
   "SGB warm portrait contrast keeps the intended green channel")
 T.eq(math.floor(alphaPixels[1][2][3] * 255 + 0.5), vividRed[3],
   "SGB warm portrait contrast keeps the intended blue channel")
+
+-- Crystal Animated Sprites 1.x exposes its animated battle front as a GIF.
+-- Its native summary decodes that itself, while an external screen must use
+-- the shipped first PNG frame because LÖVE cannot load GIFs as an Image.
+local gifPath = "crystal_animated_sprites_with_shiny_visuals/assets/front/normal/19.gif"
+local gifFramePath = "crystal_animated_sprites_with_shiny_visuals/assets/front/normal/19/001.png"
+local gifPixels = {}
+for y = 0, 6 do
+  gifPixels[y] = {}
+  for x = 0, 6 do
+    local inside = x >= 1 and x <= 5 and y >= 1 and y <= 5
+    gifPixels[y][x] = inside and { 0.5, 0.5, 0.5, 1 }
+      or { 0, 0, 0, 0 }
+  end
+end
+-- Opaque white Crystal details remain authored art. This fixture only proves
+-- the GIF-to-first-frame fallback; it must not receive an unrelated cutout.
+gifPixels[2][2], gifPixels[3][2], gifPixels[3][3] =
+  { 1, 1, 1, 1 }, { 1, 1, 1, 1 }, { 1, 1, 1, 1 }
+gifPixels[4][4] = { 1, 1, 1, 1 }
+local gifFrame = {}
+function gifFrame:getDimensions() return 7, 7 end
+function gifFrame:getPixel(x, y) return unpack(gifPixels[y][x]) end
+function gifFrame:mapPixel(fn)
+  for y = 0, 6 do
+    for x = 0, 6 do
+      gifPixels[y][x] = { fn(x, y, self:getPixel(x, y)) }
+    end
+  end
+end
+local gifRealPath, gifRealImageData, gifRealImage =
+  Sprites.path, Assets.imageData, Assets.image
+local gifAttempts = {}
+local originalGifDex = game.data.pokemon.FIXMON_C.dex
+game.data.pokemon.FIXMON_C.dex = 19
+Sprites.path = function(data_, species, side, opts)
+  if species == "FIXMON_C" and side == "front"
+      and opts and opts.kind == "battle" then
+    return gifPath, false
+  end
+  return gifRealPath(data_, species, side, opts)
+end
+Assets.imageData = function(path, ...)
+  gifAttempts[path] = (gifAttempts[path] or 0) + 1
+  if path == gifPath then error("GIF is not a supported image format") end
+  if path == gifFramePath then return gifFrame end
+  return gifRealImageData(path, ...)
+end
+Assets.image = function(path, ...)
+  if path == gifPath then error("GIF is not a supported image format") end
+  return gifRealImage(path, ...)
+end
+Assets.invalidate()
+local gifEntry = entryRecord.new(game, "FIXMON_C")
+local gifOK, gifErr = pcall(gifEntry.draw, gifEntry)
+Sprites.path, Assets.imageData, Assets.image =
+  gifRealPath, gifRealImageData, gifRealImage
+game.data.pokemon.FIXMON_C.dex = originalGifDex
+Assets.invalidate()
+T.check(gifOK,
+  "an animated Crystal portrait draws through its PNG frame: "
+    .. tostring(gifErr))
+T.check((gifAttempts[gifPath] or 0) > 0,
+  "the exact hooked battle sprite remains the first portrait choice")
+T.check((gifAttempts[gifFramePath] or 0) > 0,
+  "an unsupported animated GIF falls back to its shipped first PNG frame")
+T.eq(gifPixels[2][2][4], 1,
+  "Crystal's opaque white sprite details remain authored artwork")
+T.eq(gifPixels[4][4][1], 1,
+  "unlisted white sprite details remain authored white")
+
+-- The reported Rattata is a different 56x56 Yellow/SGB-derived front pose,
+-- with three enclosed white background pixels where the tail meets the body.
+-- Match the complete local geometry so only that pose is cut out; the many
+-- genuine white pixels in its belly, paws, teeth and eye must stay opaque.
+local rattataPixels = {}
+for y = 0, 55 do
+  rattataPixels[y] = {}
+  for x = 0, 55 do rattataPixels[y][x] = { 0, 0, 0, 0 } end
+end
+for _, pixel in ipairs({
+  { 24, 33 }, { 26, 33 }, { 22, 33 }, { 21, 34 },
+  { 23, 34 }, { 24, 34 }, { 26, 34 },
+}) do
+  rattataPixels[pixel[2]][pixel[1]] = { 0.35, 0.35, 0.16, 1 }
+end
+for _, pixel in ipairs({ { 25, 33 }, { 25, 34 }, { 22, 34 } }) do
+  rattataPixels[pixel[2]][pixel[1]] = { 1, 1, 1, 1 }
+end
+rattataPixels[40][30] = { 1, 1, 1, 1 }
+local rattataPortrait = {}
+function rattataPortrait:getDimensions() return 56, 56 end
+function rattataPortrait:getPixel(x, y)
+  return unpack(rattataPixels[y][x])
+end
+function rattataPortrait:mapPixel(fn)
+  for y = 0, 55 do
+    for x = 0, 55 do
+      rattataPixels[y][x] = { fn(x, y, self:getPixel(x, y)) }
+    end
+  end
+end
+local rattataRealPath, rattataRealImageData = Sprites.path, Assets.imageData
+local rattataOriginalDex = game.data.pokemon.FIXMON_C.dex
+game.data.pokemon.FIXMON_C.dex = 19
+Sprites.path = function(data_, species, side, opts)
+  if species == "FIXMON_C" and side == "front"
+      and opts and opts.kind == "battle" then
+    return "reported-rattata.png", true
+  end
+  return rattataRealPath(data_, species, side, opts)
+end
+Assets.imageData = function(path, ...)
+  if path == "reported-rattata.png" then return rattataPortrait end
+  return rattataRealImageData(path, ...)
+end
+Assets.invalidate()
+local rattataEntry = entryRecord.new(game, "FIXMON_C")
+local rattataOK, rattataErr = pcall(rattataEntry.draw, rattataEntry)
+Sprites.path, Assets.imageData = rattataRealPath, rattataRealImageData
+game.data.pokemon.FIXMON_C.dex = rattataOriginalDex
+Assets.invalidate()
+T.check(rattataOK,
+  "the reported 56x56 Rattata portrait draws headlessly: "
+    .. tostring(rattataErr))
+T.eq(rattataPixels[33][25][4], 0,
+  "Rattata's first enclosed tail-matte pixel becomes transparent")
+T.eq(rattataPixels[34][25][4], 0,
+  "Rattata's second enclosed tail-matte pixel becomes transparent")
+T.eq(rattataPixels[34][22][4], 0,
+  "Rattata's third enclosed tail-matte pixel becomes transparent")
+T.eq(rattataPixels[40][30][4], 1,
+  "Rattata's authored white body detail remains opaque")
 
 press(entry, "right")
 T.eq(entry.modernDexPages[entry.modernDexPage].id, "stats",

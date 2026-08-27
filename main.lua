@@ -99,13 +99,20 @@ return function(mod)
       activate = function(activeGame)
         local OptionsMenu = require("src.ui.OptionsMenu")
         local page = OptionsMenu.new(activeGame)
-        page.rows = optionRows()
-        page.index, page.scroll = 1, 0
+        local rows = optionRows()
+        page.rows, page.view = rows, rows
+        page.index, page.scroll, page.sub = 1, 0, true
         activeGame.stack:push(page)
       end,
     }
     return out
   end)
+
+  local GameVersion = require("src.core.GameVersion")
+  if type(GameVersion.generation) == "function"
+      and GameVersion.generation() == 2 then
+    return require("mods.modern_pokedex_ui.gen2")(mod)
+  end
 
   local crystal251 = mod.find("CRYSTAL_251")
   local usefulMoveInfo = mod.find("useful_move_info")

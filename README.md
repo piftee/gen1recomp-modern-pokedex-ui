@@ -5,6 +5,10 @@ tool without pretending the game contains later-generation systems. It keeps
 the original discovery flags, cries, Area map, dex text, sprites, and controls,
 then presents the data that is genuinely available for each species.
 
+Gold, Silver, and Crystal use the native 251-species Pokédex controller,
+including its search, Area, and Unown views, with the modern theme layered on
+top.
+
 The visual direction combines the clearer hierarchy and tabbed research pages
 of newer Pokémon games with Pokémon Red's pixel font, native-scale artwork,
 four-shade palette ramps, hard outlines, and chamfered cards.
@@ -65,11 +69,17 @@ The large Pokédex preview and every species profile deliberately resolve the
 `battle` front-sprite context. This matches Modern Party UI 0.3.18 and Modern
 PC UI 0.2.2, so a sprite selector cannot show one design in battle and a
 different design in the Pokédex, stats screen, or PC details rail.
+Compatibility includes both the animated-GIF and extracted-PNG releases of
+Crystal Animated Sprites: the Pokédex keeps its battle-front selection while
+using the matching first frame on renderers that cannot decode GIF files.
 Grayscale battle artwork is coloured with that species' own game palette;
 the type palette belongs only to the surrounding card. Already-full-colour
 battle replacements bypass both recolouring steps. Portrait colour protection
 follows the artwork's visible pixels and removes edge-connected matte, so a
-sprite never carries a rectangular backing or shadow into its card.
+sprite never carries a rectangular backing or shadow into its card. The
+56x56 Yellow/SGB-derived Rattata front also has a geometry-checked correction
+for three enclosed background pixels at its tail; genuine white markings and
+other Rattata replacements are not keyed away.
 
 Type names are translated individually before dual types are joined. Compact
 chips take their three-glyph abbreviation from those translated full names;

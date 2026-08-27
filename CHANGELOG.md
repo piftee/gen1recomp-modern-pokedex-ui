@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.2.7] - 2026-08-27
+
+### Fixed
+
+- The dedicated Gen 2 Pokédex options page now retains and changes its own
+  Widescreen, Backdrop and Colours rows instead of returning to the parent
+  Options view when a setting is selected.
+
+## [0.2.6] - 2026-08-27
+
+### Fixed
+
+- Restored compatibility with current Gen1Recomp builds whose dedicated
+  Pokédex controller exposes its visible-row budget through `rows()`. Modern
+  Pokédex UI no longer replaces that method with a number, preventing the
+  `PokedexMenu.lua:116: attempt to call method 'rows' (a number value)` crash.
+- Responsive scrolling continues to use the number of rows actually visible
+  at the current aspect ratio, while older Gen1Recomp builds with a numeric
+  `rows` field remain supported.
+
+## [0.2.5] - 2026-08-26
+
+### Fixed
+
+- Corrected the reported Rattata portrait at its actual source: the 56x56
+  Yellow/SGB-derived battle pose, rather than either Crystal animation set.
+  Three enclosed white background pixels at the tail/body gap are now made
+  transparent in both palette-rendered and authored-colour replacements.
+- The Rattata cutout first verifies the complete pixel geometry, so other
+  Rattata artwork and genuine white belly, paw, tooth, and eye pixels remain
+  untouched. Crystal's authored white pixels are likewise left unchanged.
+
+## [0.2.4] - 2026-08-25
+
+### Fixed
+
+- Crystal Animated Sprites 1.x battle portraits now fall back from the mod's
+  animated GIF path to its matching first PNG frame. Modern Pokédex INFO,
+  STATS, FAMILY, and browsing cards no longer show a blank grey portrait when
+  that sprite pack is combined with translations, randomizers, or Unique
+  Menu Icons.
+
 ## [0.2.3] - 2026-08-24
 
 ### Changed
