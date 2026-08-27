@@ -16,6 +16,7 @@ return {
       "One selectable level-up and compatible TM/HM list with detail views",
       "Conditional page extension hook for data supplied by other mods",
       "Unique Menu Icons and alpha-fitted HGSS icon compatibility",
+      "Crystal Animated Sprites GIF and extracted-frame compatibility",
       "Selectable Light and Dark modern-retro colour themes",
       "Compact 160x144 and responsive widescreen layouts",
     },

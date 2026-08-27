@@ -42,6 +42,12 @@ themes.
   and PC details.
 - Large portraits remove only edge-connected matte and publish pixel-tight
   true-colour regions, never a rectangular backing.
+- Alpha-backed battle art treats opaque white as authored artwork rather than
+  globally erasing it. The reported 56x56 Yellow/SGB-derived Rattata pose is
+  the one narrow exception: a complete geometry signature clears its three
+  enclosed tail/body background pixels in palette and true-colour paths.
+  Crystal frames, other Rattata poses, and genuine white markings are not
+  altered; future exceptions must be equally species- and asset-specific.
 - No new Pokémon artwork or ROM-derived asset is included in the package.
 
 ## Layout checks
