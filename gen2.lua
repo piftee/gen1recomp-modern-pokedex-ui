@@ -488,6 +488,9 @@ return function(mod)
   local provider = inherited or PokedexMenu
   local record = {
     new = function(game, ...)
+      if type(mod.exports.reconcileOwnedPokemon) == "function" then
+        mod.exports.reconcileOwnedPokemon(game)
+      end
       local menu = provider.new(game, ...)
       if type(menu) ~= "table" or menu.modernPokedexGeneration == 2 then
         return menu

@@ -1,6 +1,153 @@
 -- Modern Pokedex UI keeps the native discovery data and action behavior, then
 -- replaces the dex list, its action overlay, and the species data page.
 return function(mod)
+  local activeGame
+  local reconcileElapsed = 0
+  local OWNERSHIP_PROOF_FLAGS = {
+    EVENT_CHOSE_CHARMANDER = "CHARMANDER",
+    EVENT_CHOSE_SQUIRTLE = "SQUIRTLE",
+    EVENT_CHOSE_BULBASAUR = "BULBASAUR",
+    EVENT_GOT_BULBASAUR_IN_CERULEAN = "BULBASAUR",
+    EVENT_GOT_SQUIRTLE_FROM_OFFICER_JENNY = "SQUIRTLE",
+    EVENT_GOT_EEVEE = "EEVEE",
+  }
+
+  -- A Pokémon in the player's live save is stronger evidence of ownership
+  -- than the route that placed it there. Vanilla catches, gifts, trades and
+  -- evolutions update the Pokédex themselves, but some third-party acquisition
+  -- paths only append the Pokémon to the party or PC. Reconcile those sources
+  -- silently so existing saves self-heal without every companion mod needing
+  -- a bespoke compatibility patch.
+  local function registerOwnedSpecies(game, species)
+    if type(game) ~= "table" or type(game.save) ~= "table"
+        or species == nil then return false end
+    local pokemon = game.data and game.data.pokemon
+    local def = type(pokemon) == "table" and pokemon[species] or nil
+    -- Species without a Pokédex number cannot be represented by either the
+    -- native controller or this presentation. Do not inflate global counts
+    -- with temporary forms or stale ids from an unloaded content mod.
+    if type(def) ~= "table" or def.dex == nil then return false end
+
+    local dex = game.save.pokedex
+    if type(dex) ~= "table" then
+      dex = {}
+      game.save.pokedex = dex
+    end
+    if type(dex.seen) ~= "table" then dex.seen = {} end
+    if type(dex.owned) ~= "table" then dex.owned = {} end
+    local added = dex.owned[species] ~= true
+    dex.seen[species] = true
+    dex.owned[species] = true
+    return added
+  end
+
+  local function reconcileOwnedPokemon(game)
+    if type(game) ~= "table" or type(game.save) ~= "table" then return 0 end
+    local save, added, visited = game.save, 0, {}
+
+    local function recordSpecies(species)
+      if species == nil or visited[species] then return end
+      visited[species] = true
+      if registerOwnedSpecies(game, species) then added = added + 1 end
+    end
+
+    local function record(mon)
+      if type(mon) ~= "table" or mon.isEgg == true then return end
+      recordSpecies(mon.species)
+    end
+
+    local function scan(list)
+      if type(list) ~= "table" then return end
+      for _, mon in pairs(list) do record(mon) end
+    end
+
+    scan(save.party)
+    for _, box in pairs(type(save.boxes) == "table" and save.boxes or {}) do
+      -- Normal saves contain a list of box lists. Accept a flat third-party
+      -- box as well; malformed metadata is ignored by record().
+      if type(box) == "table" and box.species ~= nil then
+        record(box)
+      else
+        scan(box)
+      end
+    end
+    scan(save.box) -- pre-12-box saves and older companion mods
+
+    local daycare = save.daycare
+    if type(daycare) == "table" then
+      record(daycare.mon)
+      scan(daycare.mons)
+    end
+
+    -- Hall of Fame records are historical proof that a species belonged to
+    -- the player, so they can restore ownership lost from an older broken
+    -- acquisition path even when that Pokémon is no longer in storage.
+    for _, roster in pairs(type(save.hallOfFame) == "table"
+        and save.hallOfFame or {}) do
+      scan(roster)
+    end
+
+    -- These story flags are only written after a successful gift and are
+    -- therefore safe historical evidence when an already-evolved or traded-
+    -- away gift is no longer present in a standard container. Yellow reuses
+    -- the otherwise opaque EVENT_54F for Damian's Charmander, so gate that
+    -- one (and its special starter) on the save version.
+    local flags = type(save.flags) == "table" and save.flags or {}
+    for flag, species in pairs(OWNERSHIP_PROOF_FLAGS) do
+      if flags[flag] then recordSpecies(species) end
+    end
+    if tostring(save.version or ""):lower() == "yellow" then
+      if flags.EVENT_GOT_STARTER then recordSpecies("PIKACHU") end
+      if flags.EVENT_54F then recordSpecies("CHARMANDER") end
+    end
+    return added
+  end
+
+  mod.exports.registerOwnedSpecies = registerOwnedSpecies
+  mod.exports.reconcileOwnedPokemon = reconcileOwnedPokemon
+
+  -- Repair loaded saves immediately, then keep common third-party paths
+  -- covered with a deliberately low-frequency observer. This preserves the
+  -- species that was actually obtained before a later evolution can replace
+  -- it in the party. The screen factory also performs the same idempotent
+  -- check directly before constructing the native list.
+  mod.events:on("game.ready", function(event)
+    activeGame = type(event) == "table" and event.game or activeGame
+    reconcileOwnedPokemon(activeGame)
+  end, 1000)
+  mod.events:on("save.loaded", function()
+    reconcileOwnedPokemon(activeGame)
+  end, -1000)
+  mod.events:on("save.created", function()
+    reconcileOwnedPokemon(activeGame)
+  end, -1000)
+  mod.events:on("screen.pushed", function(event)
+    local state = type(event) == "table" and event.state or nil
+    local game = type(state) == "table" and state.game or activeGame
+    if type(game) == "table" then activeGame = game end
+    reconcileOwnedPokemon(game)
+  end, -1000)
+  mod.events:on("pokemon.caught", function(event)
+    local game = type(event) == "table" and event.game or activeGame
+    if type(event) == "table" then
+      registerOwnedSpecies(game, event.species)
+    end
+    reconcileOwnedPokemon(game)
+  end, -1000)
+  mod.hooks:wrap("save.write", function(next, game)
+    reconcileOwnedPokemon(game or activeGame)
+    return next(game)
+  end, 1000)
+  mod.hooks:wrap("input.step", function(next, game, dt)
+    if type(game) == "table" then activeGame = game end
+    reconcileElapsed = reconcileElapsed + math.max(0, tonumber(dt) or 0)
+    if reconcileElapsed >= 0.5 then
+      reconcileElapsed = reconcileElapsed % 0.5
+      reconcileOwnedPokemon(game or activeGame)
+    end
+    return next(game, dt)
+  end, -1000)
+
   local optionSchema = {
     { key = "responsive", label = "POKEDEX WIDESCREEN", type = "toggle",
       default = true },
@@ -128,6 +275,7 @@ return function(mod)
       and crystal251.exports.crystalMoveScripts,
     moveEffectText = usefulMoveInfo and usefulMoveInfo.exports
       and usefulMoveInfo.exports.effectText,
+    reconcileOwnedPokemon = reconcileOwnedPokemon,
   }
 
   local source, readErr = mod:read("screen.lua")

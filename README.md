@@ -20,6 +20,12 @@ four-shade palette ramps, hard outlines, and chamfered cards.
   on wide displays; search values are limited to discovered species so the
   feature never leaks an unseen Pokémon's name or typing
 - a compact 160×144 layout that preserves the same browsing flow
+- an ownership safety net for gifts, overworld catches, and other modded
+  acquisition paths that omit the native Pokédex update. Pokémon actually
+  present in the party, PC boxes, Day Care, legacy storage, or Hall of Fame
+  silently restore their seen/caught flags, while reliable completed-gift
+  flags restore historical Kanto starters and Eevee. Unhatched eggs remain
+  concealed
 - an INFO page with dex number, caught state, available category, type,
   measurements, and field notes; long notes scroll instead of being discarded
 - a STATS page with available base stats, Base Stat Total when the complete
@@ -164,6 +170,22 @@ The context exposes the current `game`, `state`, species `def`, owned state,
 layout, colour regions, and small `draw` helpers. This makes abilities,
 breeding, habitats, held items, forms, or other systems possible when a mod
 actually supplies them, while keeping an ordinary Gen I installation honest.
+
+Companion acquisition mods can also register a species immediately through
+the public compatibility exports. The first function records one successfully
+obtained species; the second reconciles every standard ownership container in
+the current save and returns the number of newly repaired entries.
+
+```lua
+local dexMod = mod.find("modern_pokedex_ui")
+local dex = dexMod and dexMod.exports
+if dex and dex.registerOwnedSpecies then
+  dex.registerOwnedSpecies(game, obtainedMon.species)
+end
+-- Or, after importing a party or custom gift batch:
+local repaired = dex and dex.reconcileOwnedPokemon
+  and dex.reconcileOwnedPokemon(game) or 0
+```
 
 ## Development
 

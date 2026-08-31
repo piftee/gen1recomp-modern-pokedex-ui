@@ -1486,6 +1486,9 @@ return function(mod, compatibility)
   end
 
   local function makePokedex(game, opts)
+    if type(compatibility.reconcileOwnedPokemon) == "function" then
+      compatibility.reconcileOwnedPokemon(game)
+    end
     local screen = BuiltinPokedex.new(game, opts)
     local nativeUpdate = screen.update
     -- Gen1Recomp originally exposed ListMenu's visible-row budget as the
