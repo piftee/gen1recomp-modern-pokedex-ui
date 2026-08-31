@@ -150,6 +150,93 @@ local function press(state, key)
   input.pressed[key] = nil
 end
 
+-- Third-party gift/catch paths sometimes place a valid Pokémon in the save
+-- without setting the native Pokédex flags. Opening the Pokédex repairs every
+-- standard ownership container before the native controller snapshots rows.
+do
+  local repairStack = { states = {} }
+  function repairStack:push(state) self.states[#self.states + 1] = state end
+  function repairStack:pop() return table.remove(self.states) end
+  function repairStack:top() return self.states[#self.states] end
+  local repairGame = {
+    data = run.data,
+    save = {
+      pokedex = { seen = {}, owned = {} },
+      party = { { species = "FIXMON_A" } },
+      boxes = { { { species = "FIXMON_B" } },
+        { { species = "FIXMON_C", isEgg = true } } },
+      box = { { species = "REMOVED_MOD_SPECIES" } },
+      daycare = { mon = { species = "FIXMON_C" } },
+      hallOfFame = { { { species = "FIXMON_A" } } },
+    },
+    stack = repairStack,
+    input = { wasPressed = function() return false end },
+  }
+  local repairDex = dexRecord.new(repairGame)
+  for _, species in ipairs({ "FIXMON_A", "FIXMON_B", "FIXMON_C" }) do
+    T.check(repairGame.save.pokedex.seen[species] == true
+        and repairGame.save.pokedex.owned[species] == true,
+      "opening the Pokédex registers owned " .. species)
+  end
+  T.check(repairGame.save.pokedex.owned.REMOVED_MOD_SPECIES == nil,
+    "ownership repair ignores ids absent from the merged Pokédex data")
+  for index, row in ipairs(repairDex.modernDexEntries or {}) do
+    T.check(row.seen and row.owned,
+      "repaired Pokédex row " .. index .. " is immediately visible as caught")
+  end
+
+  local reconcile = run.loader.exports.modern_pokedex_ui
+    and run.loader.exports.modern_pokedex_ui.reconcileOwnedPokemon
+  T.check(type(reconcile) == "function",
+    "companion mods can request the same ownership reconciliation")
+  T.eq(reconcile(repairGame), 0,
+    "ownership reconciliation is idempotent after the save is repaired")
+
+  local eggGame = {
+    data = run.data,
+    save = { pokedex = { seen = {}, owned = {} },
+      party = { { species = "FIXMON_A", isEgg = true } } },
+  }
+  T.eq(reconcile(eggGame), 0,
+    "an unhatched egg does not reveal its species in the Pokédex")
+  T.check(eggGame.save.pokedex.owned.FIXMON_A == nil,
+    "egg ownership remains hidden until hatching clears the egg state")
+
+  local trackedGame = {
+    data = run.data,
+    save = { pokedex = { seen = {}, owned = {} }, party = {}, boxes = {} },
+  }
+  run.loader.events:emit("game.ready", { game = trackedGame })
+  trackedGame.save.party[1] = { species = "FIXMON_A" }
+  Runtime.call("input.step", function() end, trackedGame, 0.5)
+  T.check(trackedGame.save.pokedex.owned.FIXMON_A == true,
+    "a direct modded party addition is registered before a later evolution")
+
+  local yellowGiftGame = {
+    data = { pokemon = {
+      PIKACHU = { dex = 25 }, BULBASAUR = { dex = 1 },
+      CHARMANDER = { dex = 4 }, SQUIRTLE = { dex = 7 },
+    } },
+    save = {
+      version = "yellow",
+      flags = {
+        EVENT_GOT_STARTER = true,
+        EVENT_GOT_BULBASAUR_IN_CERULEAN = true,
+        EVENT_54F = true,
+        EVENT_GOT_SQUIRTLE_FROM_OFFICER_JENNY = true,
+      },
+      pokedex = { seen = {}, owned = {} }, party = {}, boxes = {},
+    },
+  }
+  T.eq(reconcile(yellowGiftGame), 4,
+    "Yellow's completed starter gifts repair their historical base entries")
+  for _, species in ipairs({ "PIKACHU", "BULBASAUR", "CHARMANDER",
+      "SQUIRTLE" }) do
+    T.check(yellowGiftGame.save.pokedex.owned[species] == true,
+      "Yellow gift proof restores " .. species)
+  end
+end
+
 local dex = dexRecord.new(game)
 stack:push(dex)
 T.check(dex.modernPokedexUI == true, "the responsive Pokedex list is active")

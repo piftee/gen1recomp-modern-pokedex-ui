@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.8] - 2026-08-31
+
+### Added
+
+- Added an ownership reconciliation safety net for gifts, overworld catches,
+  save imports, and other modded acquisition paths that place a Pokémon in the
+  save without updating the native Pokédex flags.
+- Existing saves now silently restore seen/caught state from the party, all PC
+  boxes, Day Care, legacy box storage, and Hall of Fame records before either
+  the Gen 1 or Gen 2 Pokédex list is constructed. Reliable completed-gift
+  flags also recover historical Kanto starters and Eevee, including Yellow's
+  three side-quest starters. Unhatched eggs and species absent from the merged
+  Pokédex data remain concealed.
+- Companion mods can call the public `registerOwnedSpecies(game, species)` or
+  `reconcileOwnedPokemon(game)` exports for immediate synchronization.
+
 ## [0.2.7] - 2026-08-27
 
 ### Fixed
