@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.9] - 2026-09-01
+
+### Added
+
+- Gold, Silver, and Crystal Pokédex entries now expose an EVO action for every
+  real multi-species family. The new native Gen 2 family page resolves baby
+  Pokémon and branched lines from merged game/mod data, hides undiscovered
+  relatives, and describes level, stone, trade, happiness/time, and Tyrogue
+  stat-comparison conditions. Standalone species retain the original action
+  bar.
+
+### Fixed
+
+- Gold, Silver, and Crystal Pokédex list rows now leave a clear gutter between
+  the three-digit Pokédex number and the Pokémon name.
+
 ## [0.2.8] - 2026-08-31
 
 ### Added

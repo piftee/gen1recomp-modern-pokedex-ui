@@ -7,7 +7,9 @@ then presents the data that is genuinely available for each species.
 
 Gold, Silver, and Crystal use the native 251-species Pokédex controller,
 including its search, Area, and Unown views, with the modern theme layered on
-top.
+top. Multi-species entries also gain an EVO action backed by the live Gen II
+data, with complete family paths and level, item, trade, happiness, time, and
+stat-comparison conditions.
 
 The visual direction combines the clearer hierarchy and tabbed research pages
 of newer Pokémon games with Pokémon Red's pixel font, native-scale artwork,
