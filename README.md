@@ -1,5 +1,8 @@
 # Modern Pokedex UI
 
+> [!IMPORTANT]
+> **This standalone mod has been superseded by [Modern UI Suite](https://github.com/piftee/gen1recomp-modern-ui-suite).** It remains available for existing installs, but future fixes and features will be maintained in the suite. Disable this standalone mod before enabling the suite; the suite imports its saved settings automatically.
+
 Modern Pokedex UI turns Gen I's Pokédex into a useful modern-retro research
 tool without pretending the game contains later-generation systems. It keeps
 the original discovery flags, cries, Area map, dex text, sprites, and controls,
