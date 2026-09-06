@@ -68,11 +68,19 @@ stub("src.world.gen2.Palettes", { monColors = function() return nil end })
 local pokemon = {
   PICHU = {
     id = "PICHU", dex = 172, name = "PICHU", types = { "ELECTRIC" },
+    levelMoves = { { level = 1, move = "THUNDERSHOCK" } },
     evolutions = { { method = "EVOLVE_HAPPINESS", time = "ANYTIME",
       into = "PIKACHU" } },
   },
   PIKACHU = {
     id = "PIKACHU", dex = 25, name = "PIKACHU", types = { "ELECTRIC" },
+    levelMoves = {
+      { level = 1, move = "GROWL" },
+      { level = 1, move = "THUNDERSHOCK" },
+      { level = 6, move = "TAIL_WHIP" },
+    },
+    tmhm = { "THUNDER", "FLASH" },
+    tutorMoves = { "THUNDERBOLT" },
     evolutions = { { method = "EVOLVE_ITEM", item = "THUNDERSTONE",
       into = "RAICHU" } },
   },
@@ -98,7 +106,33 @@ local game = {
     items = {
       THUNDERSTONE = { name = "THUNDERSTONE" },
       KINGS_ROCK = { name = "KING'S ROCK" },
+      TM_THUNDER = { name = "TM25", tmLabel = "TM25", teaches = "THUNDER" },
+      HM_FLASH = { name = "HM05", tmLabel = "HM05", teaches = "FLASH" },
     },
+    moves = {
+      GROWL = { id = "GROWL", name = "GROWL", type = "NORMAL",
+        power = 0, accuracy = 100, pp = 40,
+        description = "Reduces the foe's ATTACK." },
+      THUNDERSHOCK = { id = "THUNDERSHOCK", name = "THUNDERSHOCK",
+        type = "ELECTRIC", power = 40, accuracy = 100, pp = 30,
+        description = "An attack that may cause paralysis." },
+      TAIL_WHIP = { id = "TAIL_WHIP", name = "TAIL WHIP", type = "NORMAL",
+        power = 0, accuracy = 100, pp = 30,
+        description = "Lowers the foe's DEFENSE." },
+      THUNDER = { id = "THUNDER", name = "THUNDER", type = "ELECTRIC",
+        power = 120, accuracy = 70, pp = 10,
+        description = "A wicked thunderbolt is dropped." },
+      FLASH = { id = "FLASH", name = "FLASH", type = "NORMAL",
+        power = 0, accuracy = 70, pp = 20,
+        description = "Blinds the foe to reduce accuracy." },
+      THUNDERBOLT = { id = "THUNDERBOLT", name = "THUNDERBOLT",
+        type = "ELECTRIC", power = 95, accuracy = 100, pp = 15,
+        description = "An electric blast that may paralyze." },
+    },
+    type_chart = { types = {
+      ELECTRIC = { name = "ELECTRIC", category = "special" },
+      NORMAL = { name = "NORMAL", category = "physical" },
+    } },
   },
   save = { pokedex = {
     seen = { PICHU = true, PIKACHU = true, RAICHU = true, DITTO = true },
@@ -117,6 +151,11 @@ local screens = {
   end,
 }
 local mod = {
+  path = "mods/modern_pokedex_ui",
+  read = function(self, name)
+    local file = assert(io.open(self.path .. "/" .. name, "rb"))
+    local source = file:read("*a"); file:close(); return source
+  end,
   exports = {}, content = { screens = screens },
   log = { info = function() end },
 }
@@ -177,6 +216,23 @@ T.eq(menu:modernGen2EvolutionLabel({ edge = {
     method = "EVOLVE_STAT", level = 20, comparison = "ATK_EQ_DEF",
   } }), "LV20: ATK = DEF", "Tyrogue's stat condition is described")
 
+local moveRows = menu:modernGen2MoveRowsFor("PIKACHU")
+T.eq(#moveRows, 6,
+  "Gen 2 combines level-up, TM/HM and tutor compatibility")
+T.same({ moveRows[1].id, moveRows[2].id, moveRows[3].id },
+  { "GROWL", "THUNDERSHOCK", "TAIL_WHIP" },
+  "level-up moves retain level and source order")
+T.eq(moveRows[4].sourceDetail, "TM25",
+  "Gen 2 machine items expose their actual TM number")
+T.eq(moveRows[5].sourceDetail, "HM05",
+  "Gen 2 machine items expose their actual HM number")
+T.eq(moveRows[6].sourceDetail, "TUTOR",
+  "Crystal tutor moves are distinguished from machines")
+T.eq(menu:modernGen2MoveCategory(game.data.moves.THUNDER), "SPEC",
+  "Gen 2 move class follows the merged type chart")
+T.eq(menu:modernGen2MoveCategory(game.data.moves.GROWL), "STATUS",
+  "zero-power Gen 2 moves are shown as status moves")
+
 local function press(key)
   input.pressed[key] = true
   menu:update(0)
@@ -186,8 +242,8 @@ end
 press("right")
 press("right")
 T.same(menu.modernGen2EntryActions,
-  { "PAGE", "AREA", "EVO", "CRY", "PRNT" },
-  "a real family adds EVO without removing native Gen 2 actions")
+  { "PAGE", "AREA", "EVO", "MOVE", "CRY", "PRNT" },
+  "a real family adds EVO and MOVE without removing native Gen 2 actions")
 press("a")
 T.eq(menu.view, "family", "EVO opens the evolution-family page")
 T.eq(menu.modernGen2FamilyCursor, 1,
@@ -203,6 +259,48 @@ T.eq(menu.view, "entry", "A opens a known family member's data")
 T.eq(menu:current().species, "PIKACHU",
   "opening a relative updates the native Gen 2 list selection")
 T.eq(menu.lastCry, "PIKACHU", "opening a relative plays its cry")
+
+press("right")
+press("right")
+press("right")
+press("a")
+T.eq(menu.view, "moves", "MOVE opens the combined Gen 2 learnset")
+T.eq(menu.modernGen2MoveCursor, 1,
+  "the move list initially selects the first level-up move")
+menu.modernGen2MoveCursor = 4
+local moveText = {}
+Font.draw = function(value, x, y)
+  moveText[#moveText + 1] = tostring(value)
+  return realFontDraw(value, x, y)
+end
+menu:drawPanel()
+Font.draw = realFontDraw
+T.check(table.concat(moveText, "|"):find("TM25", 1, true) ~= nil,
+  "the move list renders the complete machine number")
+press("a")
+T.check(menu.modernGen2MoveDetail == true,
+  "A opens the selected move's data page")
+local detailText = {}
+Font.draw = function(value, x, y)
+  detailText[#detailText + 1] = tostring(value)
+  return realFontDraw(value, x, y)
+end
+menu:drawPanel()
+Font.draw = realFontDraw
+local renderedDetail = table.concat(detailText, "|")
+T.check(renderedDetail:find("THUNDER", 1, true) ~= nil
+    and renderedDetail:find("TM25", 1, true) ~= nil,
+  "move details identify the move and its learning source")
+T.check(renderedDetail:find("PWR", 1, true) ~= nil
+    and renderedDetail:find("SPEC", 1, true) ~= nil,
+  "move details show battle power and Gen 2 class")
+T.check(renderedDetail:find("A wicked", 1, true) ~= nil,
+  "move details render Gen 2's supplied flavour text")
+press("b")
+T.check(menu.modernGen2MoveDetail == false,
+  "B returns from move data to the move list")
+press("b")
+T.eq(menu.view, "entry", "B returns from the move list to Pokédex data")
 
 -- Standalone species retain the cartridge's original PAGE/AREA/CRY/PRNT bar
 -- instead of exposing an empty evolution page.

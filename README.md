@@ -1,5 +1,10 @@
 # Modern Pokedex UI
 
+
+Crystal Animated Sprites with Shiny Visuals 2.0.2 compatibility: Gen 2
+Pokédex list and entry previews retain the companion's authored colours and
+entry animations. Native artwork keeps its cartridge palettes. Verified in Gold, Silver and Crystal.
+
 Modern Pokedex UI turns Gen I's Pokédex into a useful modern-retro research
 tool without pretending the game contains later-generation systems. It keeps
 the original discovery flags, cries, Area map, dex text, sprites, and controls,
@@ -9,7 +14,14 @@ Gold, Silver, and Crystal use the native 251-species Pokédex controller,
 including its search, Area, and Unown views, with the modern theme layered on
 top. Multi-species entries also gain an EVO action backed by the live Gen II
 data, with complete family paths and level, item, trade, happiness, time, and
-stat-comparison conditions.
+stat-comparison conditions. Entries with learnset data gain a MOVE action with
+their level-up moves, numbered TM/HM compatibility, Crystal tutors, battle
+facts, and the flavour/effect text extracted from the active Gen II ROM.
+
+Native Gen 2 portraits also receive reviewed background-gap cutouts, guarded
+by species, size and the complete decoded image. White markings and highlights
+are preserved; different replacement artwork and alpha are left untouched.
+These corrections are local to the modern Pokédex, including its Unown views.
 
 The visual direction combines the clearer hierarchy and tabbed research pages
 of newer Pokémon games with Pokémon Red's pixel font, native-scale artwork,
@@ -48,6 +60,11 @@ four-shade palette ramps, hard outlines, and chamfered cards.
   when those mods are present. Crystal 251's Flamethrower, Thunderbolt, and Ice
   Beam Move Tutors are correctly labelled `TUTOR` rather than being given a
   false TM number
+- on Gold, Silver, and Crystal, the MOVES page reads the native Gen II
+  `levelMoves`, `tmhm`, and Crystal `tutorMoves` fields. Its details use the
+  current ROM's move name, type, power, accuracy, PP, physical/special/status
+  class, and description, so translations and content mods remain
+  authoritative
 - the native DATA, CRY, AREA, QUIT, and Pokémon Yellow PRNT actions remain
   authoritative
 

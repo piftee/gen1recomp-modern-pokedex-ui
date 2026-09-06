@@ -16,11 +16,15 @@ Font.load(T.fixtures.fresh())
 local pokemon = {
   PICHU = {
     id = "PICHU", dex = 172, name = "PICHU", types = { "ELECTRIC" },
+    levelMoves = { { level = 1, move = "THUNDERSHOCK" } },
     evolutions = { { method = "EVOLVE_HAPPINESS", time = "ANYTIME",
       into = "PIKACHU" } },
   },
   PIKACHU = {
     id = "PIKACHU", dex = 25, name = "PIKACHU", types = { "ELECTRIC" },
+    levelMoves = { { level = 1, move = "THUNDERSHOCK" } },
+    tmhm = { "THUNDER", "FLASH" },
+    tutorMoves = { "THUNDERBOLT" },
     evolutions = { { method = "EVOLVE_ITEM", item = "THUNDERSTONE",
       into = "RAICHU" } },
   },
@@ -45,7 +49,27 @@ local game = {
   data = {
     pokemon = pokemon, items = {
       THUNDERSTONE = { name = "THUNDERSTONE" },
+      TM_THUNDER = { name = "TM25", tmLabel = "TM25", teaches = "THUNDER" },
+      HM_FLASH = { name = "HM05", tmLabel = "HM05", teaches = "FLASH" },
     },
+    moves = {
+      THUNDERSHOCK = { id = "THUNDERSHOCK", name = "THUNDERSHOCK",
+        type = "ELECTRIC", power = 40, accuracy = 100, pp = 30,
+        description = "An attack that may cause paralysis." },
+      THUNDER = { id = "THUNDER", name = "THUNDER", type = "ELECTRIC",
+        power = 120, accuracy = 70, pp = 10,
+        description = "A wicked thunderbolt is dropped." },
+      FLASH = { id = "FLASH", name = "FLASH", type = "NORMAL",
+        power = 0, accuracy = 70, pp = 20,
+        description = "Blinds the foe to reduce accuracy." },
+      THUNDERBOLT = { id = "THUNDERBOLT", name = "THUNDERBOLT",
+        type = "ELECTRIC", power = 95, accuracy = 100, pp = 15,
+        description = "An electric blast that may paralyze." },
+    },
+    type_chart = { types = {
+      ELECTRIC = { name = "ELECTRIC", category = "special" },
+      NORMAL = { name = "NORMAL", category = "physical" },
+    } },
   },
   save = { pokedex = {
     seen = { PICHU = true, PIKACHU = true, RAICHU = true },
@@ -64,6 +88,11 @@ local screens = {
   end,
 }
 local mod = {
+  path = "mods/modern_pokedex_ui",
+  read = function(self, name)
+    local file = assert(io.open(self.path .. "/" .. name, "rb"))
+    local source = file:read("*a"); file:close(); return source
+  end,
   exports = {}, content = { screens = screens },
   log = { info = function() end },
 }
@@ -81,6 +110,10 @@ T.eq(#menu.rows, 3, "the native controller built all fixture rows")
 local family = menu:modernGen2EvolutionFamily("RAICHU")
 T.same({ family[1].species, family[2].species, family[3].species }, order,
   "the live controller resolves the complete Pichu family")
+local moves = menu:modernGen2MoveRowsFor("PIKACHU")
+T.same({ moves[2].sourceDetail, moves[3].sourceDetail,
+    moves[4].sourceDetail }, { "TM25", "HM05", "TUTOR" },
+  "the real controller exposes numbered machines and Crystal tutors")
 
 local function press(key)
   input.pressed[key] = true
@@ -103,5 +136,21 @@ press("a")
 T.eq(menu.view, "entry", "a known relative returns to native entry mode")
 T.eq(menu:current().species, "PIKACHU",
   "the native list follows the selected relative")
+
+press("right")
+press("right")
+press("right")
+press("a")
+T.eq(menu.view, "moves", "the real controller opens the MOVE view")
+local movesDrawOK, movesDrawErr = pcall(menu.drawPanel, menu)
+T.check(movesDrawOK,
+  "the native Gen 2 move list renders headlessly: " .. tostring(movesDrawErr))
+press("a")
+T.check(menu.modernGen2MoveDetail == true,
+  "the real controller opens move details")
+local detailDrawOK, detailDrawErr = pcall(menu.drawPanel, menu)
+T.check(detailDrawOK,
+  "the native Gen 2 move details render headlessly: "
+    .. tostring(detailDrawErr))
 
 T.finish("modern_pokedex_ui native Gen 2 evolution info")
