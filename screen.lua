@@ -3020,7 +3020,19 @@ return function(mod, compatibility)
       for index, row in ipairs(list.modernDexEntries) do
         if row.def and row.def.id == species then
           list.index = index
-          local rows = math.max(1, list.rows or activeLayout(list).rows)
+          -- Dedicated Pokédex controllers in newer Gen1Recomp builds expose
+          -- rows as a method, while older ListMenu-based builds store the
+          -- same visible-row budget as a number. Resolve both contracts before
+          -- synchronising the backing list; passing the method itself to
+          -- math.max crashes when a FAMILY card is opened.
+          local rows = list.rows
+          if type(rows) == "function" then
+            local ok, value = pcall(rows, list)
+            rows = ok and value or nil
+          end
+          rows = math.max(1, math.floor(tonumber(rows)
+            or tonumber(list.modernDexVisibleRows)
+            or activeLayout(list).rows))
           if index <= list.scroll then
             list.scroll = index - 1
           elseif index > list.scroll + rows then

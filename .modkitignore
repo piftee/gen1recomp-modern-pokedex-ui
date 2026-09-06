@@ -3,6 +3,7 @@
 tests/modern_pokedex_ui_test.lua
 tests/gen2_evolution_info_test.lua
 tests/gen2_evolution_preview_driver.lua
+tests/gen2_move_preview_driver.lua
 tests/gen2_native_evolution_test.lua
 tests/preview_driver.lua
 tests/fixtures/dex_extras/main.lua
@@ -10,3 +11,4 @@ tests/fixtures/dex_extras/manifest.json
 tests/fixtures/crystal_251_moves/main.lua
 tests/fixtures/crystal_251_moves/manifest.json
 Modern-Pokedex-UI-*.zip
+Modern-Pokedex-UI-v0.2.8-gen2-evolution-test.zip

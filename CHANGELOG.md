@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.2.14] - 2026-09-05
+
+- Preserve Crystal Animated Sprites with Shiny Visuals colours on Gen 2
+  list and entry previews, including filename-less static images and animated
+  frames. Native grayscale sprites keep their species palettes.
+
+## [0.2.13] - 2026-09-05
+
+- Conservative re-audit of all 831 Gen 2 portraits restores uncertain white
+  details and the complete verified native Silver/Crystal Goldeen fin.
+  Exact-source guards and native RGB/outline remain intact; Gold is unchanged.
+- Pokédex EVO/MOVE controllers and actions remain unchanged.
+
+## [0.2.12] - 2026-09-05
+
+- Corrected reviewed background-white gaps in native Gen 2 front pictures,
+  including Unown forms, using species/size/full-RGBA SHA-256 guarded masks.
+  True white artwork, colors and outlines remain unchanged. Different images,
+  authored animation frames and modified alpha safely retain native rendering.
+- Kept existing EVO and MOVE actions/controllers intact and extended their
+  test fixtures to load the component-local picture helper.
+
+## [0.2.11] - 2026-09-05
+
+### Added
+
+- Gold, Silver, and Crystal entries with learnset data now expose a MOVE
+  action. The combined list presents level-up moves first, then every
+  compatible TM/HM with its real `TMxx` or `HMxx` number, plus Crystal's
+  separate Move Tutor rows.
+- Gen 2 move details now show the active ROM's move name, learning source,
+  type, power, accuracy, PP, physical/special/status class, and extracted
+  flavour/effect description. Both wide and compact layouts retain the same
+  selectable list and A/B navigation.
+
+## [0.2.10] - 2026-09-03
+
+### Fixed
+
+- Opening a known Pokémon from the Gen 1 FAMILY page no longer crashes on
+  newer Gen1Recomp builds whose Pokédex exposes its visible-row count as a
+  method instead of a numeric field. The backing list still follows the
+  selected relative so returning to the index preserves the expected cursor.
+
 ## [0.2.9] - 2026-09-01
 
 ### Added

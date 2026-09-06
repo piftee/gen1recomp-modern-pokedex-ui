@@ -298,6 +298,27 @@ do
     "native syncScroll receives the responsive five-row budget")
   T.eq(methodDex.modernDexVisibleRows, 5,
     "the modern renderer records the same visible-row budget")
+
+  -- GitHub #4: opening a known FAMILY relative synchronises the backing
+  -- Pokédex selection. That path must call a method-based rows contract
+  -- instead of passing the function itself to math.max.
+  stack:push(methodDex)
+  local methodFamilyEntry = methodScreens.entry.new(game, "FIXMON_A")
+  stack:push(methodFamilyEntry)
+  press(methodFamilyEntry, "right")
+  press(methodFamilyEntry, "right")
+  press(methodFamilyEntry, "down")
+  local openedRelative, relativeErr = pcall(press,
+    methodFamilyEntry, "a")
+  T.check(openedRelative,
+    "method-based Pokédex opens a FAMILY relative without crashing: "
+      .. tostring(relativeErr))
+  T.eq(methodFamilyEntry.def.id, "FIXMON_B",
+    "the method-based FAMILY view opens the selected relative")
+  T.eq(methodDex.index, 2,
+    "the method-based backing list follows the selected relative")
+  stack:pop()
+  stack:pop()
 end
 
 local realListIcon = PartyMenu.drawIcon

@@ -2,11 +2,16 @@
 -- This wrapper keeps those controllers intact and adds the Modern Pokedex
 -- theme/status treatment to every native view.
 return function(mod)
+  local cutoutSource = assert(mod:read("gen2_portrait_cutouts.lua"))
+  local PortraitCutouts = assert(load(cutoutSource, "@" .. mod.path
+    .. "/gen2_portrait_cutouts.lua"))()
   local PokedexMenu = require("src.ui.gen2.PokedexMenu")
   local Chrome = require("src.ui.gen2.Chrome")
   local Font = require("src.render.Font")
   local GbcPalette = require("src.render.GbcPalette")
+  local Assets = require("src.render.Assets")
   local Palettes = require("src.world.gen2.Palettes")
+  local TypeChart = require("src.battle.TypeChart")
 
   local INK_BLACK = { 0, 0, 0 }
   local INK_WHITE = { 1, 1, 1 }
@@ -116,11 +121,27 @@ return function(mod)
     })
   end
 
+  local function colorForType(typeId)
+    local key = tostring(typeId or "normal"):lower():gsub("_type$", "")
+    return TYPE_COLORS[key] or TYPE_COLORS.normal
+  end
+
   local function typeColor(menu, species)
     local def = species and menu.pokemon and menu.pokemon[species]
     local types = def and def.types or {}
-    return TYPE_COLORS[tostring(types[1] or "normal"):lower()]
-      or TYPE_COLORS.normal, types
+    return colorForType(types[1]), types
+  end
+
+  local function typeName(menu, typeId)
+    local types = menu.data and menu.data.type_chart
+      and menu.data.type_chart.types or {}
+    local record = types[typeId]
+    local name = record and record.name
+    if not name and type(TypeChart.displayName) == "function" then
+      local ok, value = pcall(TypeChart.displayName, typeId, menu.data)
+      if ok then name = value end
+    end
+    return tostring(name or typeId or "---"):upper()
   end
 
   local function screenWidth(menu)
@@ -194,6 +215,31 @@ return function(mod)
 
   local PIC_PAD = { [7] = { 0, 0 }, [6] = { 1, 1 }, [5] = { 1, 2 } }
 
+  -- Crystal supplies both coloured and pre-baked monochrome frames. Its
+  -- image predicate also recognizes animated frames without a filename;
+  -- a species flag alone could exempt an unrelated/native replacement.
+  local function drawPortrait(image, colors, body, def)
+    local provider = mod.find and mod.find("crystal_animated_sprites_with_shiny_visuals")
+    local api = provider and provider.exports
+    local authored = api and type(api.isCrystalImage) == "function" and api.isCrystalImage(image)
+    -- Assets loads static pictures through ImageData, so those Images have
+    -- no filename for Crystal's predicate. Match the exact registered source.
+    if not authored and def and def.trueColor and def.spriteFront then
+      local ok, source = pcall(Assets.image, def.spriteFront)
+      authored = ok and source == image
+    end
+    if authored then
+      local shader = love.graphics.getShader()
+      love.graphics.setShader()
+      body()
+      love.graphics.setShader(shader)
+    elseif colors and GbcPalette.available() then
+      GbcPalette.with(colors, body)
+    else
+      body()
+    end
+  end
+
   -- Native drawPic first paints a 56x56 cartridge-paper tile block. Modern
   -- Pokedex panels already provide the type-coloured face, so draw only the
   -- transparent sprite pixels and let that face show through behind them.
@@ -215,11 +261,8 @@ return function(mod)
     local function body()
       love.graphics.draw(image, x + pad[1] * 8, y + pad[2] * 8)
     end
-    if colors and GbcPalette.available() then
-      GbcPalette.with(colors, body)
-    else
-      body()
-    end
+    drawPortrait(image, colors, body, row and row.seen
+      and menu.pokemon and menu.pokemon[row.species])
   end
 
   local function drawList(menu)
@@ -493,11 +536,204 @@ return function(mod)
     return family, cursor, family[cursor]
   end
 
+  local function machineSources(menu)
+    if menu.modernGen2MachineSources then
+      return menu.modernGen2MachineSources
+    end
+    local sources = {}
+    for id, item in pairs(menu.data and menu.data.items or {}) do
+      if type(item) == "table" then
+        local move, kind, number
+        if type(item.machine) == "table" then
+          move = item.machine.move
+          kind = tostring(item.machine.kind or "TM"):upper()
+          number = tonumber(item.machine.number)
+        elseif item.teaches then
+          move = item.teaches
+          local label = tostring(item.tmLabel or item.name or id or ""):upper()
+          kind, number = label:match("^(TM)(%d+)$")
+          if not kind then kind, number = label:match("^(HM)(%d+)$") end
+          number = tonumber(number)
+        end
+        if move then
+          kind = kind == "HM" and "HM" or "TM"
+          local full = number and ("%s%02d"):format(kind, number)
+            or tostring(item.tmLabel or item.name or id or kind):upper()
+          sources[move] = {
+            short = kind, full = full,
+            kind = kind == "HM" and "hm" or "machine",
+          }
+        end
+      end
+    end
+
+    -- Generated Gen 2 data also publishes its machine order. It is a useful
+    -- fallback for mods that merge the compatibility list but omit item
+    -- records: 50 TMs, seven HMs, then Crystal's three move tutors.
+    local machineOrder = menu.pokemon and menu.pokemon.tmhmMoves
+      or (menu.data and menu.data.pokemon and menu.data.pokemon.tmhmMoves)
+      or (menu.data and menu.data.tmhmMoves)
+    for index, move in ipairs(type(machineOrder) == "table"
+        and machineOrder or {}) do
+      if not sources[move] then
+        if index <= 50 then
+          sources[move] = { short = "TM", full = ("TM%02d"):format(index),
+            kind = "machine" }
+        elseif index <= 57 then
+          sources[move] = { short = "HM",
+            full = ("HM%02d"):format(index - 50), kind = "hm" }
+        else
+          sources[move] = { short = "TUTOR", full = "TUTOR",
+            kind = "tutor" }
+        end
+      end
+    end
+    menu.modernGen2MachineSources = sources
+    return sources
+  end
+
+  local function resetMoveSelection(menu)
+    menu.modernGen2MoveSpecies = nil
+    menu.modernGen2MoveRows = nil
+    menu.modernGen2MoveCursor = 1
+    menu.modernGen2MoveScroll = 0
+    menu.modernGen2MoveDetail = false
+  end
+
+  local function moveRows(menu, species)
+    species = species or (menu:current() and menu:current().species)
+    if menu.modernGen2MoveSpecies == species
+        and type(menu.modernGen2MoveRows) == "table" then
+      return menu.modernGen2MoveRows
+    end
+    local pokemon = menu.pokemon or (menu.data and menu.data.pokemon) or {}
+    local def = species and pokemon[species] or nil
+    local moves = menu.data and menu.data.moves or {}
+    local levelRows, rows, added = {}, {}, {}
+    local ordinal = 0
+    local function addLevel(level, move)
+      if not move then return end
+      level = tonumber(level) or 1
+      local key = tostring(level) .. ":" .. tostring(move)
+      if added[key] then return end
+      ordinal = ordinal + 1
+      levelRows[#levelRows + 1] = {
+        source = tostring(level), sourceDetail = "LEVEL " .. tostring(level),
+        level = level, id = move, kind = "level", ordinal = ordinal,
+        move = moves[move],
+      }
+      added[key] = true
+    end
+    for _, move in ipairs(def and def.level1Moves or {}) do addLevel(1, move) end
+    for _, learned in ipairs(def and def.levelMoves or {}) do
+      if type(learned) == "table" then addLevel(learned.level, learned.move) end
+    end
+    -- A few cross-generation content mods retain the Gen 1 field name while
+    -- running on Gen 2. Treat it as another source without duplicating rows.
+    for _, learned in ipairs(def and def.learnset or {}) do
+      if type(learned) == "table" then addLevel(learned.level, learned.move) end
+    end
+    table.sort(levelRows, function(a, b)
+      if a.level ~= b.level then return a.level < b.level end
+      return a.ordinal < b.ordinal
+    end)
+    for _, row in ipairs(levelRows) do rows[#rows + 1] = row end
+
+    local sources = machineSources(menu)
+    menu.modernGen2MoveMachineStart = #rows + 1
+    for _, move in ipairs(def and def.tmhm or {}) do
+      local source = sources[move] or {
+        short = "TM/HM", full = "TM/HM", kind = "compatibility",
+      }
+      rows[#rows + 1] = {
+        source = source.short, sourceDetail = source.full,
+        id = move, kind = source.kind, move = moves[move],
+      }
+    end
+    for _, move in ipairs(def and def.tutorMoves or {}) do
+      rows[#rows + 1] = {
+        source = "TUTOR", sourceDetail = "TUTOR", id = move,
+        kind = "tutor", move = moves[move],
+      }
+    end
+
+    menu.modernGen2MoveSpecies = species
+    menu.modernGen2MoveRows = rows
+    menu.modernGen2MoveCursor = math.max(1,
+      math.min(math.floor(menu.modernGen2MoveCursor or 1),
+        math.max(1, #rows)))
+    menu.modernGen2MoveScroll = math.max(0,
+      math.floor(menu.modernGen2MoveScroll or 0))
+    menu.modernGen2MoveDetail = false
+    return rows
+  end
+
+  local function moveListState(menu)
+    local rows = moveRows(menu)
+    local maxVisible = screenWidth(menu) >= 240 and 7 or 6
+    local count = #rows
+    menu.modernGen2MoveCursor = math.max(1,
+      math.min(math.floor(menu.modernGen2MoveCursor or 1),
+        math.max(1, count)))
+    local maxScroll = math.max(0, count - maxVisible)
+    menu.modernGen2MoveScroll = math.max(0,
+      math.min(math.floor(menu.modernGen2MoveScroll or 0), maxScroll))
+    if menu.modernGen2MoveCursor <= menu.modernGen2MoveScroll then
+      menu.modernGen2MoveScroll = menu.modernGen2MoveCursor - 1
+    elseif menu.modernGen2MoveCursor
+        > menu.modernGen2MoveScroll + maxVisible then
+      menu.modernGen2MoveScroll = menu.modernGen2MoveCursor - maxVisible
+    end
+    return rows, maxVisible
+  end
+
+  local function selectedMoveRow(menu)
+    local rows = moveListState(menu)
+    return rows[menu.modernGen2MoveCursor], rows
+  end
+
+  local function moveCategory(menu, move)
+    if type(move) ~= "table" then return nil end
+    local category = move.category
+    if category == nil and move.power ~= nil then
+      if tonumber(move.power) == 0 then
+        category = "status"
+      else
+        local types = menu.data and menu.data.type_chart
+          and menu.data.type_chart.types or {}
+        local record = types[move.type]
+        category = record and record.category
+        if category == nil and type(TypeChart.category) == "function" then
+          local ok, value = pcall(TypeChart.category, move.type)
+          if ok then category = value end
+        end
+      end
+    end
+    category = category and tostring(category):upper() or nil
+    if category == "PHYSICAL" then return "PHYS" end
+    if category == "SPECIAL" then return "SPEC" end
+    return category
+  end
+
+  local function moveDescription(menu, move)
+    if type(move) ~= "table" then return nil end
+    local supplied = move.description or move.desc or move.text
+    if supplied == nil or tostring(supplied) == "" then return nil end
+    if type(supplied) == "string" and menu.data and menu.data.text
+        and menu.data.text[supplied] ~= nil then
+      supplied = menu.data.text[supplied]
+    end
+    return tostring(supplied)
+  end
+
   local function entryActions(menu)
     local row = menu:current()
     local family = evolutionFamily(menu, row and row.species)
     local actions = { "PAGE", "AREA" }
     if #family > 1 then actions[#actions + 1] = "EVO" end
+    if #moveRows(menu, row and row.species) > 0 then
+      actions[#actions + 1] = "MOVE"
+    end
     actions[#actions + 1] = "CRY"
     actions[#actions + 1] = "PRNT"
     menu.modernGen2EntryActions = actions
@@ -540,15 +776,14 @@ return function(mod)
       { 0.38, 0.66, 0.10 })
     drawInk(tostring(entry.kind or "POKéMON"), mainX + 6, 36,
       mainW - 12, INK_BLACK)
-    setColor(TYPE_COLORS[tostring(types[1] or "normal"):lower()]
-      or TYPE_COLORS.normal)
+    setColor(colorForType(types[1]))
     local typeW = math.min(64, math.max(39, math.floor((mainW - 17) / 2)))
     chamfer("fill", mainX + 6, 49, typeW, 14, 2)
     drawInkCentered(tostring(types[1] or "---"):upper(), mainX + 8, 52,
       typeW - 4,
       INK_WHITE)
     if types[2] and types[2] ~= types[1] then
-      setColor(TYPE_COLORS[tostring(types[2]):lower()] or TYPE_COLORS.normal)
+      setColor(colorForType(types[2]))
       local type2X = mainX + 11 + typeW
       chamfer("fill", type2X, 49, typeW, 14, 2)
       drawInkCentered(tostring(types[2]):upper(), type2X + 2, 52,
@@ -570,13 +805,19 @@ return function(mod)
     setColor(BLUE)
     G.rectangle("fill", 0, 132, width, 12)
     local actionW = math.floor(width / #actions)
+    local compactAction = {
+      PAGE = "PG", AREA = "AR", EVO = "EV", MOVE = "MV",
+      CRY = "CR", PRNT = "PR",
+    }
     for i, label in ipairs(actions) do
       local x = (i - 1) * actionW
       if i == (menu.entryAction or 1) then
         setColor(BLUE_DARK)
         G.rectangle("fill", x + 1, 132, actionW - 2, 12)
       end
-      drawInkCentered(label, x + 1, 134, actionW - 2,
+      local shown = Font.width(label) <= actionW - 2
+        and label or compactAction[label] or label
+      drawInkCentered(shown, x + 1, 134, actionW - 2,
         i == (menu.entryAction or 1) and INK_WHITE or INK_LIGHT)
     end
   end
@@ -650,6 +891,139 @@ return function(mod)
       width >= 240 and "A DATA B BACK" or "A VIEW B")
   end
 
+  local function drawMoves(menu)
+    local G = love.graphics
+    local width = screenWidth(menu)
+    local wide = width >= 240
+    drawBackdrop(menu)
+    drawHeader(menu, "MOVE LIST", false)
+    setColor(PAPER)
+    chamfer("fill", 2, 20, width - 4, 110, 3)
+
+    local rows, maxVisible = moveListState(menu)
+    local hasTutor = false
+    for _, row in ipairs(rows) do
+      if row.kind == "tutor" then hasTutor = true break end
+    end
+    local heading = hasTutor
+      and (wide and "LEVEL UP / TM-HM / TUTOR" or "LV/TM/HM/TUT")
+      or (wide and "LEVEL UP / TM-HM" or "LV/TM-HM")
+    drawInk(heading, 8, 25, width - 48, BLUE_DARK)
+    drawInkRight("PP", width - 8, 25, 24, BLUE_DARK)
+
+    local rowStep = wide and 13 or 14
+    local rowY = 37
+    for visible = 1, maxVisible do
+      local index = (menu.modernGen2MoveScroll or 0) + visible
+      local row = rows[index]
+      if not row then break end
+      local move = row.move or { name = row.id }
+      local selected = index == menu.modernGen2MoveCursor
+      setColor(selected and SELECTED or colorForType(move.type))
+      chamfer("fill", 6, rowY, width - 12, 12, 2)
+      if selected then
+        setColor(INK_WHITE)
+        G.rectangle("fill", 9, rowY + 4, 3, 3)
+      end
+      local source = row.kind == "level"
+        and row.source or (row.sourceDetail or row.source)
+      local sourceW = row.kind == "level" and 17
+        or math.min(44, Font.width(tostring(source or "")) + 2)
+      local ink = selected and INK_WHITE or INK_BLACK
+      drawInk(source, 14, rowY + 2, sourceW, ink)
+      drawInk(move.name or row.id, 16 + sourceW, rowY + 2,
+        width - sourceW - 51, ink)
+      if move.pp ~= nil then
+        drawInkRight(tostring(move.pp), width - 10, rowY + 2, 24, ink)
+      end
+      rowY = rowY + rowStep
+    end
+    drawFooter(menu, wide and "UP/DOWN MOVE" or "U/D MOVE",
+      wide and "A DATA B BACK" or "A VIEW B")
+  end
+
+  local function drawMoveDetail(menu)
+    local width = screenWidth(menu)
+    local wide = width >= 240
+    drawBackdrop(menu)
+    drawHeader(menu, "MOVE DATA", false)
+    setColor(PAPER)
+    chamfer("fill", 2, 20, width - 4, 110, 3)
+
+    local row = selectedMoveRow(menu)
+    if not row then
+      drawInkCentered("NO MOVE DATA", 8, 69, width - 16, BLUE_DARK)
+      return drawFooter(menu, "MOVE DETAILS", "B LIST")
+    end
+    local move = row.move or { name = row.id }
+    local x, y, w = 6, 23, width - 12
+    setColor(colorForType(move.type))
+    chamfer("fill", x, y, w, 27, 3)
+    local typeW = wide and 68 or 44
+    drawInk(move.name or row.id, x + 6, y + 4, w - typeW - 14,
+      INK_BLACK)
+    local source = row.kind == "level"
+      and ("LEVEL " .. tostring(row.source or "?"))
+      or tostring(row.sourceDetail or row.source or "COMPATIBLE")
+    drawInk(source, x + 6, y + 15, w - typeW - 14, INK_BLACK)
+    setColor(SELECTED)
+    chamfer("fill", x + w - typeW - 4, y + 7, typeW, 14, 2)
+    drawInkCentered(typeName(menu, move.type), x + w - typeW - 2,
+      y + 10, typeW - 4, INK_WHITE)
+
+    local facts = {}
+    if move.power ~= nil then facts[#facts + 1] = { "PWR", move.power } end
+    if move.accuracy ~= nil then
+      -- The cartridge font has no percent glyph and the native move-data
+      -- screens present accuracy as the bare 0-100 value.
+      facts[#facts + 1] = { "ACC", move.accuracy }
+    end
+    if move.pp ~= nil then facts[#facts + 1] = { "PP", move.pp } end
+    local category = moveCategory(menu, move)
+    if category then facts[#facts + 1] = { "CLASS", category } end
+    if move.priority ~= nil then
+      facts[#facts + 1] = { "PRIORITY", move.priority }
+    end
+
+    local columns = math.min(wide and 5 or 4, math.max(1, #facts))
+    local factRows = #facts > 0 and math.ceil(#facts / columns) or 0
+    local factY, cellH = y + 32, wide and 25 or 22
+    for index, fact in ipairs(facts) do
+      local zero = index - 1
+      local column, factRow = zero % columns, math.floor(zero / columns)
+      local x1 = x + math.floor(column * w / columns)
+      local x2 = x + math.floor((column + 1) * w / columns)
+      local cellY = factY + factRow * cellH
+      setColor(PAPER_ALT)
+      chamfer("fill", x1 + 1, cellY, x2 - x1 - 3, cellH - 3, 2)
+      local label = fact[1]
+      if not wide or columns >= 5 then
+        label = ({ CLASS = "CAT", PRIORITY = "PRI" })[label] or label
+      end
+      drawInkCentered(label, x1 + 2, cellY + 2, x2 - x1 - 5, BLUE_DARK)
+      drawInkCentered(tostring(fact[2]), x1 + 2, cellY + 11,
+        x2 - x1 - 5, INK_BLACK)
+    end
+
+    local detailY = factY + factRows * cellH + 1
+    local detailH = 128 - detailY
+    if detailH >= 16 then
+      setColor(PAPER_ALT)
+      chamfer("fill", x + 1, detailY, w - 2, detailH, 2)
+      drawInk("EFFECT", x + 6, detailY + 3, 48, BLUE_DARK)
+      local detail = moveDescription(menu, move)
+        or "NO DESCRIPTION AVAILABLE."
+      local lineWidth = math.max(8, math.floor((w - 12) / 8))
+      local maxLines = math.max(1, math.floor((detailH - 12) / 9))
+      for index, line in ipairs(descriptionLines(detail, lineWidth)) do
+        if index > maxLines then break end
+        drawInk(line, x + 6, detailY + 12 + (index - 1) * 9,
+          w - 12, INK_BLACK)
+      end
+    end
+    drawFooter(menu, wide and "MOVE DETAILS" or "MOVE DATA", "B LIST")
+  end
+
   local function focusFamilyMember(menu, member)
     if not member or not familyKnown(menu, member.species) then return false end
     local function findRow()
@@ -677,6 +1051,7 @@ return function(mod)
     menu.modernGen2Family = nil
     menu.modernGen2FamilyCursor = nil
     menu.modernGen2FamilyScroll = 0
+    resetMoveSelection(menu)
     if type(menu.playCry) == "function" then menu:playCry(member.species) end
     return true
   end
@@ -702,6 +1077,27 @@ return function(mod)
     end
   end
 
+  local function updateMoves(menu, input)
+    local rows = moveListState(menu)
+    if menu.modernGen2MoveDetail then
+      if input:wasPressed("b") then menu.modernGen2MoveDetail = false end
+      return
+    end
+    if input:wasPressed("b") then
+      menu.view = "entry"
+    elseif input:wasPressed("up") and #rows > 0 then
+      menu.modernGen2MoveCursor = math.max(1,
+        menu.modernGen2MoveCursor - 1)
+      moveListState(menu)
+    elseif input:wasPressed("down") and #rows > 0 then
+      menu.modernGen2MoveCursor = math.min(#rows,
+        menu.modernGen2MoveCursor + 1)
+      moveListState(menu)
+    elseif input:wasPressed("a") and #rows > 0 then
+      menu.modernGen2MoveDetail = true
+    end
+  end
+
   local function updateEntry(menu, input)
     local actions = entryActions(menu)
     menu.entryAction = math.max(1,
@@ -721,6 +1117,10 @@ return function(mod)
         menu.view = "family"
         menu.modernGen2FamilySpecies = nil
         familySelection(menu)
+      elseif action == "MOVE" then
+        resetMoveSelection(menu)
+        moveListState(menu)
+        menu.view = "moves"
       elseif action == "CRY" and type(menu.playCry) == "function" then
         local row = menu:current()
         menu:playCry(row and row.species)
@@ -870,6 +1270,7 @@ return function(mod)
       local nativeUpdate = menu.update
       menu.modernPokedexUI = true
       menu.modernPokedexGeneration = 2
+      PortraitCutouts.attachPokedex(menu)
       menu.modernDexEntries = menu.rows
       menu.modernDexCount = #(menu.rows or {})
       menu.classicGen2PokedexPanel = nativePanel
@@ -879,10 +1280,18 @@ return function(mod)
       menu.modernGen2EvolutionLabel = function(self, parent)
         return evolutionLabel(self, parent)
       end
+      menu.modernGen2MoveRowsFor = function(self, species)
+        return moveRows(self, species)
+      end
+      menu.modernGen2MoveCategory = function(self, move)
+        return moveCategory(self, move)
+      end
       menu.update = function(self, dt)
         local input = self.game and self.game.input
         if input and self.view == "family" then
           return updateFamily(self, input)
+        elseif input and self.view == "moves" then
+          return updateMoves(self, input)
         elseif input and self.view == "entry" and not self.newEntry then
           self.entryBlink = (self.entryBlink or 0) + 1
           return updateEntry(self, input)
@@ -894,6 +1303,12 @@ return function(mod)
           drawEntry(self)
         elseif self.view == "family" then
           drawFamily(self)
+        elseif self.view == "moves" then
+          if self.modernGen2MoveDetail then
+            drawMoveDetail(self)
+          else
+            drawMoves(self)
+          end
         elseif self.view == "option" then
           drawOption(self)
         elseif self.view == "search" then
