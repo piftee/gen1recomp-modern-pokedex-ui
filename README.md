@@ -1,5 +1,7 @@
 # Modern Pokedex UI
 
+> [!IMPORTANT]
+> **This standalone mod has been superseded by [Modern UI Suite](https://github.com/piftee/gen1recomp-modern-ui-suite).** It remains available for existing installs, but future fixes and features will be maintained in the suite. Disable this standalone mod before enabling the suite; the suite imports its saved settings automatically.
 
 Crystal Animated Sprites with Shiny Visuals 2.0.2 compatibility: Gen 2
 Pokédex list and entry previews retain the companion's authored colours and
