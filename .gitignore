@@ -1,1 +1,18 @@
 Modern-Pokedex-UI-*.zip
+
+# Installation-local inputs and captured game content never belong in Git.
+/baseroms/
+/assets/generated/
+/data/generated/
+/save/
+/screenshots/
+*.gb
+*.gbc
+*.gba
+*.ips
+*.bps
+*.zip
+
+# Local Python checks
+__pycache__/
+*.pyc

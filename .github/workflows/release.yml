@@ -52,6 +52,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check tracked distribution assets
+        run: python3 .github/scripts/distribution_guard.py
+
       - name: Determine version
         id: ver
         env:
@@ -156,6 +159,7 @@ jobs:
           zip_path="$out/${MOD_ID}-${VERSION}.zip"
           (cd "$staging" && zip -qr "$zip_path" .)
           unzip -l "$zip_path"
+          python3 .github/scripts/distribution_guard.py --zip "$zip_path"
 
           unzip -p "$zip_path" manifest.json > "$RUNNER_TEMP/packed-manifest.json"
           python3 - "$RUNNER_TEMP/packed-manifest.json" "$VERSION" <<'PY'
